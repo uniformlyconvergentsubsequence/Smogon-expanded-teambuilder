@@ -1,6 +1,6 @@
 import { createContext, useContext, useReducer, useState, useEffect, useCallback } from 'react';
 import { DEFAULT_FORMAT, RATING_CUTOFFS } from '../data/formats';
-import { fetchAvailableRatings } from '../services/smogonApi';
+import { fetchAvailableRatings, preloadRatings } from '../services/smogonApi';
 
 const AppContext = createContext(null);
 
@@ -86,6 +86,11 @@ export function AppProvider({ children }) {
       if (cancelled) return;
       setAvailableRatings(ratings);
       setRatingsLoading(false);
+
+      // Preload chaos data for all ratings in the background
+      if (ratings && ratings.length > 0) {
+        preloadRatings(state.format.month, formatId, ratings);
+      }
 
       // If we got ratings back and the current rating isn't in the list, auto-correct
       if (ratings && ratings.length > 0 && !ratings.includes(state.format.rating)) {

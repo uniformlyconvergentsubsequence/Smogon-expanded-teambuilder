@@ -19,6 +19,58 @@ const CORS_PROXIES = isDev
 
 const cache = new Map();
 const CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
+const STORAGE_PREFIX = 'smogon-cache:';
+
+/**
+ * Try to read from sessionStorage
+ */
+function storageGet(key) {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_PREFIX + key);
+    if (!raw) return null;
+    const entry = JSON.parse(raw);
+    if (Date.now() - entry.timestamp < CACHE_DURATION) return entry.data;
+    sessionStorage.removeItem(STORAGE_PREFIX + key);
+  } catch (e) { /* ignore parse / quota errors */ }
+  return null;
+}
+
+/**
+ * Write to sessionStorage (best-effort; silently drops if quota exceeded)
+ */
+function storageSet(key, data) {
+  try {
+    sessionStorage.setItem(STORAGE_PREFIX + key, JSON.stringify({ data, timestamp: Date.now() }));
+  } catch (e) {
+    // QuotaExceeded — evict oldest entries and retry once
+    try {
+      evictOldestStorageEntries(5);
+      sessionStorage.setItem(STORAGE_PREFIX + key, JSON.stringify({ data, timestamp: Date.now() }));
+    } catch (_) { /* give up */ }
+  }
+}
+
+/**
+ * Remove the N oldest cache entries from sessionStorage
+ */
+function evictOldestStorageEntries(count) {
+  const entries = [];
+  for (let i = 0; i < sessionStorage.length; i++) {
+    const k = sessionStorage.key(i);
+    if (k?.startsWith(STORAGE_PREFIX)) {
+      try {
+        const { timestamp } = JSON.parse(sessionStorage.getItem(k));
+        entries.push({ key: k, timestamp });
+      } catch (_) {
+        entries.push({ key: k, timestamp: 0 });
+      }
+    }
+  }
+  entries.sort((a, b) => a.timestamp - b.timestamp);
+  for (let i = 0; i < Math.min(count, entries.length); i++) {
+    sessionStorage.removeItem(entries[i].key);
+  }
+}
 
 /**
  * Fetch with CORS proxy fallback
@@ -52,16 +104,26 @@ async function fetchWithFallback(url) {
 }
 
 /**
- * Fetch with caching
+ * Fetch with two-tier caching (memory → sessionStorage → network)
  */
 async function cachedFetch(url, parser = 'text') {
   const cacheKey = url + ':' + parser;
-  const cached = cache.get(cacheKey);
 
-  if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
-    return cached.data;
+  // L1: in-memory
+  const memCached = cache.get(cacheKey);
+  if (memCached && Date.now() - memCached.timestamp < CACHE_DURATION) {
+    return memCached.data;
   }
 
+  // L2: sessionStorage
+  const stored = storageGet(cacheKey);
+  if (stored !== null) {
+    // Promote to L1
+    cache.set(cacheKey, { data: stored, timestamp: Date.now() });
+    return stored;
+  }
+
+  // L3: network
   const response = await fetchWithFallback(url);
   let data;
 
@@ -71,7 +133,9 @@ async function cachedFetch(url, parser = 'text') {
     data = await response.text();
   }
 
+  // Store in both layers
   cache.set(cacheKey, { data, timestamp: Date.now() });
+  storageSet(cacheKey, data);
   return data;
 }
 
@@ -369,10 +433,41 @@ export async function fetchAvailableRatings(month, format) {
 }
 
 /**
- * Clear the cache
+ * Clear the cache (both memory and sessionStorage)
  */
 export function clearCache() {
   cache.clear();
+  // Clear sessionStorage cache entries
+  const keysToRemove = [];
+  for (let i = 0; i < sessionStorage.length; i++) {
+    const k = sessionStorage.key(i);
+    if (k?.startsWith(STORAGE_PREFIX)) keysToRemove.push(k);
+  }
+  keysToRemove.forEach(k => sessionStorage.removeItem(k));
+}
+
+/**
+ * Preload chaos data for all given ratings of a format/month in the background.
+ * This makes switching ratings instant since the data is already cached.
+ */
+const preloadInFlight = new Set();
+
+export function preloadRatings(month, format, ratings) {
+  if (!ratings || !ratings.length) return;
+
+  for (const rating of ratings) {
+    const key = `${month}:${format}:${rating}`;
+    if (preloadInFlight.has(key)) continue;
+    preloadInFlight.add(key);
+
+    // Fire-and-forget background fetch — errors are silently ignored
+    fetchChaosData(month, format, rating).catch(() => {}).finally(() => {
+      preloadInFlight.delete(key);
+    });
+
+    // Also preload usage text data
+    fetchUsageStats(month, format, rating).catch(() => {});
+  }
 }
 
 /**
