@@ -632,3 +632,143 @@ export function stopIdlePreloader() {
   preloaderAbort = true;
   preloaderRunning = false;
 }
+
+// ===================== Smogon Strategy Dex =====================
+
+const SMOGON_DEX_BASE = 'https://www.smogon.com/dex';
+
+// Gen number → dex gen slug
+const DEX_GEN_MAP = {
+  1: 'rb', 2: 'gs', 3: 'rs', 4: 'dp', 5: 'bw', 6: 'xy', 7: 'sm', 8: 'ss', 9: 'sv',
+};
+
+/**
+ * Parse dexSettings JSON from the Smogon dex HTML page.
+ * The page embeds all data in a script tag: `dexSettings = { injectRpcs: [...] };`
+ */
+function parseDexSettingsFromHTML(html) {
+  const marker = 'dexSettings = ';
+  const start = html.indexOf(marker);
+  if (start === -1) return null;
+
+  const jsonStart = start + marker.length;
+  let depth = 0;
+  let i = jsonStart;
+  for (; i < html.length; i++) {
+    if (html[i] === '{') depth++;
+    if (html[i] === '}') {
+      depth--;
+      if (depth === 0) { i++; break; }
+    }
+  }
+
+  try {
+    return JSON.parse(html.substring(jsonStart, i));
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Extract strategy data from parsed dexSettings.
+ * Returns { strategies, learnset } or null.
+ */
+function extractStrategyFromDexSettings(dexSettings) {
+  if (!dexSettings?.injectRpcs) return null;
+
+  for (const rpc of dexSettings.injectRpcs) {
+    try {
+      const key = JSON.parse(rpc[0])[0];
+      if (key === 'dump-pokemon') {
+        return rpc[1]; // { strategies, learnset, languages, ... }
+      }
+    } catch (e) {
+      continue;
+    }
+  }
+  return null;
+}
+
+/**
+ * Fetch Smogon strategy dex data for a Pokemon.
+ * In dev mode uses Vite proxy; in production tries CORS proxies for the HTML page.
+ * Returns { strategies: [...], ... } or throws.
+ */
+export async function fetchSmogonStrategy(pokemonName, gen) {
+  const genSlug = DEX_GEN_MAP[gen] || 'sv';
+  const slug = pokemonName
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/\s+/g, '');
+  const dexUrl = `${SMOGON_DEX_BASE}/${genSlug}/pokemon/${slug}/`;
+  const cacheKey = `strategy:${genSlug}:${slug}`;
+
+  // L1: in-memory
+  const memCached = cache.get(cacheKey);
+  if (memCached && Date.now() - memCached.timestamp < CACHE_DURATION) {
+    return memCached.data;
+  }
+
+  // L2: sessionStorage
+  const stored = storageGet(cacheKey);
+  if (stored !== null) {
+    cache.set(cacheKey, { data: stored, timestamp: Date.now() });
+    return stored;
+  }
+
+  // L3: network — fetch the dex HTML page and parse embedded data
+  let html = null;
+
+  if (isDev) {
+    // Dev mode: use Vite proxy
+    try {
+      const proxyUrl = `/smogon-dex/${genSlug}/pokemon/${slug}/`;
+      const response = await fetch(proxyUrl, { signal: AbortSignal.timeout(15000) });
+      if (response.ok) html = await response.text();
+    } catch (e) {
+      console.warn('Dev proxy failed for strategy:', e.message);
+    }
+  }
+
+  // Production: try CORS proxies for the HTML page
+  if (!html && !isDev) {
+    const proxies = [
+      'https://corsproxy.io/?',
+      'https://api.allorigins.win/raw?url=',
+      'https://api.codetabs.com/v1/proxy?quest=',
+    ];
+    for (const proxy of proxies) {
+      try {
+        const fullUrl = `${proxy}${encodeURIComponent(dexUrl)}`;
+        const response = await fetch(fullUrl, { signal: AbortSignal.timeout(15000) });
+        if (response.ok) {
+          html = await response.text();
+          if (html.includes('dexSettings')) break;
+          html = null; // Got a response but no data
+        }
+      } catch (e) {
+        continue;
+      }
+    }
+  }
+
+  if (!html) {
+    throw new Error('Could not fetch strategy data');
+  }
+
+  const dexSettings = parseDexSettingsFromHTML(html);
+  if (!dexSettings) {
+    throw new Error('Could not parse strategy data');
+  }
+
+  const data = extractStrategyFromDexSettings(dexSettings);
+  if (!data) {
+    throw new Error('No strategy data found');
+  }
+
+  // Cache the result (only strategies, not the full HTML)
+  const result = { strategies: data.strategies || [] };
+  cache.set(cacheKey, { data: result, timestamp: Date.now() });
+  storageSet(cacheKey, result);
+  return result;
+}

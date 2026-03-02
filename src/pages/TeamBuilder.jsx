@@ -2,12 +2,12 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useTeam } from '../context/TeamContext';
 import { useApp } from '../context/AppContext';
 import { exportTeamToShowdown, importTeamFromShowdown, createEmptyPokemon, createEmptyTeam } from '../utils/exportShowdown';
-import { fetchChaosData, getPokemonFromChaos, getUsageListFromChaos, fetchMonotypeChaosData } from '../services/smogonApi';
+import { fetchChaosData, getPokemonFromChaos, getUsageListFromChaos, fetchMonotypeChaosData, fetchSmogonStrategy } from '../services/smogonApi';
 import { getPokemonTypes, formatMoveName, formatItemName, formatAbilityName, formatTypeName } from '../services/showdownData';
 import { TypeBadgeRow } from '../components/TypeBadge';
 import TypeBadge from '../components/TypeBadge';
 import FormatSelector from '../components/FormatSelector';
-import { NATURES, ALL_TYPES, isMonotypeFormat, hasMonotypeTypeData, getMonotypeFormatId } from '../data/formats';
+import { NATURES, ALL_TYPES, isMonotypeFormat, hasMonotypeTypeData, getMonotypeFormatId, getSmogonDexUrl, TIERS } from '../data/formats';
 import { generateTypeMatrix, calculateSynergyScore, getTeamWeaknesses } from '../utils/typeAnalysis';
 import { getEffectivenessClass, getEffectivenessLabel, sortByValue, parseSpread } from '../utils/helpers';
 
@@ -475,11 +475,41 @@ function PokemonEditorModal({ slot, slotIndex, chaosData, format, formatId, onSa
 
   const totalEVs = Object.values(pokemon.evs).reduce((a, b) => a + b, 0);
 
+  // Strategy data state
+  const [strategyData, setStrategyData] = useState(null);
+  const [strategyLoading, setStrategyLoading] = useState(false);
+  const [strategyError, setStrategyError] = useState(null);
+
+  // Fetch strategy when pokemon or format changes
+  useEffect(() => {
+    if (!pokemon.species) {
+      setStrategyData(null);
+      return;
+    }
+    let cancelled = false;
+    setStrategyLoading(true);
+    setStrategyError(null);
+
+    fetchSmogonStrategy(pokemon.species, format.gen)
+      .then(data => {
+        if (!cancelled) setStrategyData(data);
+      })
+      .catch(err => {
+        if (!cancelled) setStrategyError(err.message);
+      })
+      .finally(() => {
+        if (!cancelled) setStrategyLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [pokemon.species, format.gen]);
+
   const EDIT_TABS = [
     { id: 'pokemon', label: '🔍 Pokémon' },
     { id: 'moves', label: '⚔️ Moves' },
     { id: 'build', label: '🛠️ Build' },
     { id: 'evs', label: '📊 EVs/IVs' },
+    { id: 'strategy', label: '📖 Strategy' },
   ];
 
   // Global keyboard handler for Shift+Enter
@@ -850,8 +880,185 @@ function PokemonEditorModal({ slot, slotIndex, chaosData, format, formatId, onSa
               )}
             </div>
           )}
+          {/* ========== STRATEGY TAB ========== */}
+          {activeTab === 'strategy' && (
+            <StrategyTab
+              pokemon={pokemon}
+              format={format}
+              formatId={formatId}
+              strategyData={strategyData}
+              strategyLoading={strategyLoading}
+              strategyError={strategyError}
+            />
+          )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ===================== Strategy Tab =====================
+function StrategyTab({ pokemon, format, formatId, strategyData, strategyLoading, strategyError }) {
+  if (!pokemon.species) {
+    return <EmptyState text="Select a Pokémon first to see strategy info." />;
+  }
+
+  const smogonUrl = getSmogonDexUrl(pokemon.species, format.gen);
+
+  if (strategyLoading) {
+    return (
+      <div className="flex flex-col items-center gap-3 py-8">
+        <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+        <p className="text-sm text-slate-400">Loading strategy data...</p>
+      </div>
+    );
+  }
+
+  // Find the matching strategy for the current format's tier
+  const tierName = formatId.replace(/^gen\d+/, ''); // e.g. "gen9ou" -> "ou"
+  const tierLabel = TIERS.find(t => t.id === tierName)?.label || tierName.toUpperCase();
+  
+  // Try to find matching strategy
+  const matchingStrategy = strategyData?.strategies?.find(s => {
+    const sFormat = s.format?.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const target = tierName.toLowerCase().replace(/[^a-z0-9]/g, '');
+    return sFormat === target;
+  });
+
+  // All available strategies for listing
+  const allStrategies = strategyData?.strategies || [];
+
+  return (
+    <div className="space-y-4">
+      {/* Smogon Dex Link */}
+      <a
+        href={smogonUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex items-center gap-3 glass-panel p-4 hover:bg-slate-800/60 transition-colors group"
+      >
+        <div className="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center flex-shrink-0">
+          <svg className="w-5 h-5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+          </svg>
+        </div>
+        <div className="flex-1">
+          <p className="text-sm font-medium text-white group-hover:text-blue-400 transition-colors">
+            View {pokemon.species} on Smogon Dex
+          </p>
+          <p className="text-xs text-slate-500">Full analysis, sets, and discussion</p>
+        </div>
+        <svg className="w-4 h-4 text-slate-600 group-hover:text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+        </svg>
+      </a>
+
+      {strategyError && (
+        <div className="glass-panel p-4 text-center">
+          <p className="text-sm text-slate-400">Could not load strategy data from Smogon.</p>
+          <p className="text-xs text-slate-600 mt-1">Use the link above to view on Smogon directly.</p>
+        </div>
+      )}
+
+      {!strategyError && strategyData && (
+        <>
+          {/* Matching format strategy */}
+          {matchingStrategy ? (
+            <div className="glass-panel p-5">
+              <h3 className="text-sm font-semibold text-white mb-1 flex items-center gap-2">
+                📋 {tierLabel} Strategy
+              </h3>
+              <p className="text-xs text-slate-500 mb-4">From the Smogon Strategy Dex</p>
+              {matchingStrategy.overview && (
+                <div className="mb-4">
+                  <h4 className="text-xs font-semibold text-slate-400 uppercase mb-2">Overview</h4>
+                  <div
+                    className="text-sm text-slate-300 leading-relaxed prose-smogon"
+                    dangerouslySetInnerHTML={{ __html: matchingStrategy.overview }}
+                  />
+                </div>
+              )}
+              {matchingStrategy.comments && (
+                <div>
+                  <h4 className="text-xs font-semibold text-slate-400 uppercase mb-2">Comments</h4>
+                  <div
+                    className="text-sm text-slate-300 leading-relaxed prose-smogon"
+                    dangerouslySetInnerHTML={{ __html: matchingStrategy.comments }}
+                  />
+                </div>
+              )}
+              {matchingStrategy.movesets && matchingStrategy.movesets.length > 0 && (
+                <div className="mt-4 space-y-3">
+                  <h4 className="text-xs font-semibold text-slate-400 uppercase mb-2">Sets</h4>
+                  {matchingStrategy.movesets.map((set, i) => (
+                    <div key={i} className="bg-slate-800/50 rounded-lg p-3">
+                      <p className="text-sm font-semibold text-white mb-1">{set.name}</p>
+                      {set.pokemon && set.pokemon.length > 0 && set.pokemon.map((p, pi) => (
+                        <div key={pi} className="text-xs text-slate-400 space-y-0.5 mb-2">
+                          {p.items && p.items.length > 0 && <p>@ {p.items.join(' / ')}</p>}
+                          {p.abilities && p.abilities.length > 0 && <p>Ability: {p.abilities.join(' / ')}</p>}
+                          {p.teratypes && p.teratypes.length > 0 && <p>Tera Type: {p.teratypes.join(' / ')}</p>}
+                          {p.nature && <p>Nature: {p.nature}</p>}
+                          {p.evconfigs && p.evconfigs.length > 0 && (
+                            <p>EVs: {p.evconfigs.map(ev =>
+                              Object.entries(ev).filter(([,v])=>v>0).map(([k,v])=>`${v} ${k.toUpperCase()}`).join(' / ')
+                            ).join(' or ')}</p>
+                          )}
+                          {p.moveslots && p.moveslots.length > 0 && (
+                            <div className="mt-1">
+                              {p.moveslots.map((slot, si) => (
+                                <p key={si}>- {slot.map(m => m.move || m).join(' / ')}</p>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                      {set.description && (
+                        <div
+                          className="text-xs text-slate-400 mt-2 leading-relaxed prose-smogon"
+                          dangerouslySetInnerHTML={{ __html: set.description }}
+                        />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="glass-panel p-5 text-center">
+              <p className="text-slate-400 text-sm mb-1">
+                No strategy info available for <span className="text-white font-medium">{tierLabel}</span>.
+              </p>
+              <p className="text-xs text-slate-600">
+                {allStrategies.length > 0
+                  ? `Available for: ${allStrategies.map(s => s.format).join(', ')}`
+                  : 'No Smogon strategy articles exist for this Pokémon yet.'}
+              </p>
+            </div>
+          )}
+
+          {/* Other available strategies */}
+          {allStrategies.length > 1 && (
+            <div className="glass-panel p-4">
+              <h4 className="text-xs font-semibold text-slate-400 uppercase mb-2">
+                Also available in
+              </h4>
+              <div className="flex flex-wrap gap-1.5">
+                {allStrategies
+                  .filter(s => s !== matchingStrategy)
+                  .map((s, i) => (
+                    <span
+                      key={i}
+                      className="px-2 py-0.5 text-xs rounded-full bg-slate-800 text-slate-400"
+                    >
+                      {s.format}
+                    </span>
+                  ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

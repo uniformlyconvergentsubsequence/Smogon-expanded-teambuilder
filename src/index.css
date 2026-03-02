@@ -160,3 +160,39 @@
 .eff-neutral { @apply bg-slate-800 text-slate-400; }
 .eff-weak { @apply bg-red-900/60 text-red-400; }
 .eff-weak4 { @apply bg-red-800/80 text-red-300; }
+
+/* Smogon strategy prose styling */
+.prose-smogon p {
+  margin-bottom: 0.75em;
+}
+.prose-smogon p:last-child {
+  margin-bottom: 0;
+}
+.prose-smogon strong {
+  color: #e2e8f0;
+  font-weight: 600;
+}
+.prose-smogon em {
+  font-style: italic;
+}
+.prose-smogon ul, .prose-smogon ol {
+  margin: 0.5em 0;
+  padding-left: 1.5em;
+}
+.prose-smogon ul {
+  list-style-type: disc;
+}
+.prose-smogon ol {
+  list-style-type: decimal;
+}
+.prose-smogon li {
+  margin-bottom: 0.25em;
+}
+.prose-smogon a {
+  color: #60a5fa;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.prose-smogon a:hover {
+  color: #93bbfd;
+}

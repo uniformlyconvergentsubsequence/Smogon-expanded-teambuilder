@@ -25,6 +25,11 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/smogon-stats/, ''),
       },
+      '/smogon-dex': {
+        target: 'https://www.smogon.com/dex',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/smogon-dex/, ''),
+      },
     },
   },
 });
