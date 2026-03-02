@@ -68,7 +68,7 @@ export default function PokemonDetail() {
     return () => { cancelled = true; };
   }, [pokemonName, format.month, formatId, format.rating]);
 
-  const smogonUrl = getSmogonDexUrl(pokemonName, format.gen);
+  const smogonUrl = getSmogonDexUrl(pokemonName, format.gen, formatId);
   const spriteUrl = `https://play.pokemonshowdown.com/sprites/dex/${pokemonName.toLowerCase().replace(/[^a-z0-9]/g, '')}.png`;
   const types = showdownData?.types || [];
   const baseStats = showdownData?.baseStats || null;

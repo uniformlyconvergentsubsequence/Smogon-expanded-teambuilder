@@ -871,7 +871,7 @@ function StrategyTab({ pokemon, format, formatId }) {
     return <EmptyState text="Select a Pokémon first to see strategy info." />;
   }
 
-  const smogonUrl = getSmogonDexUrl(pokemon.species, format.gen);
+  const smogonUrl = getSmogonDexUrl(pokemon.species, format.gen, formatId);
   const tierName = formatId.replace(/^gen\d+/, '');
   const tierLabel = TIERS.find(t => t.id === tierName)?.label || tierName.toUpperCase();
 

@@ -143,10 +143,48 @@ export function getFormatId(gen, tier) {
   return `gen${gen}${tier}`;
 }
 
-export function getSmogonDexUrl(pokemon, gen = 9) {
+// Map our internal tier IDs to Smogon dex URL slugs
+const DEX_TIER_SLUGS = {
+  ou: 'ou',
+  uu: 'uu',
+  ru: 'ru',
+  nu: 'nu',
+  pu: 'pu',
+  zu: 'zu',
+  ubers: 'ubers',
+  lc: 'lc',
+  doublesou: 'doubles',
+  doublesuu: 'doubles',
+  doublesubers: 'doubles',
+  monotype: 'monotype',
+  nationaldex: 'national-dex',
+  nationaldexuu: 'national-dex',
+  nationaldexru: 'national-dex',
+  nationaldexmonotype: 'national-dex-monotype',
+  nationaldexubers: 'national-dex',
+  cap: 'cap',
+  '1v1': '1v1',
+  almostanyability: 'almost-any-ability',
+  balancedhackmons: 'balanced-hackmons',
+  mixandmega: 'mix-and-mega',
+  battlestadiumsingles: 'battle-stadium-singles',
+  anythinggoes: 'ag',
+  godlygift: 'godly-gift',
+  stabmons: 'stabmons',
+  nfe: 'nfe',
+};
+
+export function getSmogonDexUrl(pokemon, gen = 9, tier = '') {
   const genMap = { 1: 'rb', 2: 'gs', 3: 'rs', 4: 'dp', 5: 'bw', 6: 'xy', 7: 'sm', 8: 'ss', 9: 'sv' };
   const slug = pokemon.toLowerCase().replace(/[^a-z0-9-]/g, '').replace(/\s+/g, '-');
-  return `https://www.smogon.com/dex/${genMap[gen] || 'sv'}/pokemon/${slug}/`;
+  const genSlug = genMap[gen] || 'sv';
+  // Strip gen prefix from tier (e.g. "gen9monotype" -> "monotype")
+  const tierKey = tier.replace(/^gen\d+/, '');
+  const dexTier = DEX_TIER_SLUGS[tierKey];
+  if (dexTier && dexTier !== 'ou') {
+    return `https://www.smogon.com/dex/${genSlug}/pokemon/${slug}/${dexTier}/`;
+  }
+  return `https://www.smogon.com/dex/${genSlug}/pokemon/${slug}/`;
 }
 
 export function getStatsUrl(month, category, format, rating) {
