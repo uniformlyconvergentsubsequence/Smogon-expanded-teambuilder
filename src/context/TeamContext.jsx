@@ -10,7 +10,20 @@ function loadTeams() {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
       const data = JSON.parse(saved);
-      return data;
+      // Validate structure — ensure every team has a pokemon array
+      if (data && Array.isArray(data.teams) && data.teams.length > 0) {
+        data.teams = data.teams.map(t => ({
+          ...t,
+          name: t.name || 'Team',
+          pokemon: Array.isArray(t.pokemon) ? t.pokemon : createEmptyTeam(),
+        }));
+        if (typeof data.currentTeamIndex !== 'number' ||
+            data.currentTeamIndex < 0 ||
+            data.currentTeamIndex >= data.teams.length) {
+          data.currentTeamIndex = 0;
+        }
+        return data;
+      }
     }
   } catch (e) {
     console.error('Failed to load teams:', e);
@@ -124,7 +137,11 @@ function teamReducer(state, action) {
 export function TeamProvider({ children }) {
   const [state, dispatch] = useReducer(teamReducer, initialState);
 
-  const currentTeam = state.teams[state.currentTeamIndex];
+  const currentTeam = state.teams[state.currentTeamIndex] || { name: 'Team 1', pokemon: createEmptyTeam() };
+  // Ensure pokemon is always an array
+  if (!Array.isArray(currentTeam.pokemon)) {
+    currentTeam.pokemon = createEmptyTeam();
+  }
 
   const value = {
     teams: state.teams,
