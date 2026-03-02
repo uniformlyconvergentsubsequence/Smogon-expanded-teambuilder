@@ -479,3 +479,144 @@ export function getCacheInfo() {
     entries: Array.from(cache.keys()),
   };
 }
+
+// ====== Idle Preloader ======
+// Preloads format data in the background during browser idle time.
+// Priority: current format's ratings → popular formats in same gen → other gens.
+
+const POPULAR_TIERS = ['ou', 'uu', 'ru', 'nu', 'ubers', 'doublesou', 'lc', 'monotype', 'pu',
+  'nationaldex', 'vgc2026', 'vgc2025', 'anythinggoes', 'zu', 'balancedhackmons',
+  'nationaldexuu', 'cap', '1v1', 'doublesuu', 'doublesubers',
+  'nationaldexru', 'nationaldexmonotype', 'nationaldexubers',
+  'almostanyability', 'mixandmega', 'nfe', 'stabmons', 'godlygift',
+  'battlestadiumsingles', 'battlestadiumsinglesregi'];
+
+let idlePreloaderHandle = null;
+let idleQueue = [];
+let idleActive = false;
+const MAX_CONCURRENT_IDLE = 2; // limit parallel fetches during idle
+let idleInFlight = 0;
+
+/**
+ * Check whether a chaos URL is already cached (memory or sessionStorage).
+ */
+function isCached(url) {
+  const cacheKey = url + ':json';
+  const memCached = cache.get(cacheKey);
+  if (memCached && Date.now() - memCached.timestamp < CACHE_DURATION) return true;
+  if (storageGet(cacheKey) !== null) return true;
+  return false;
+}
+
+/**
+ * Process one item from the idle queue.
+ */
+function processIdleQueue(deadline) {
+  // Process items while there's idle time (or at least 5ms) and items remain
+  while (idleQueue.length > 0 && idleInFlight < MAX_CONCURRENT_IDLE) {
+    // Check if we have time left (give at least 5ms per task)
+    if (deadline && deadline.timeRemaining() < 5) break;
+
+    const { month, format, rating } = idleQueue.shift();
+    const chaosUrl = buildStatsUrl(month, 'chaos', format, rating);
+
+    if (isCached(chaosUrl)) continue; // already have it
+
+    idleInFlight++;
+    fetchChaosData(month, format, rating)
+      .catch(() => {}) // silently ignore failures
+      .finally(() => {
+        idleInFlight--;
+        // Schedule more work if there's still items in the queue
+        if (idleQueue.length > 0 && idleActive) {
+          scheduleIdle();
+        }
+      });
+  }
+
+  // If there are still items, schedule another idle callback
+  if (idleQueue.length > 0 && idleActive) {
+    scheduleIdle();
+  }
+}
+
+function scheduleIdle() {
+  if (typeof requestIdleCallback !== 'undefined') {
+    idlePreloaderHandle = requestIdleCallback(processIdleQueue, { timeout: 10000 });
+  } else {
+    // Fallback for Safari: use setTimeout with a generous delay
+    idlePreloaderHandle = setTimeout(() => processIdleQueue({ timeRemaining: () => 50 }), 2000);
+  }
+}
+
+/**
+ * Start the idle preloader. Builds a priority queue of formats to preload
+ * based on the user's current format selection.
+ *
+ * @param {string} month - Current month
+ * @param {number} currentGen - Current generation number
+ * @param {string} currentTier - Current tier ID
+ * @param {string} defaultRating - Rating to preload (default: '1695')
+ */
+export function startIdlePreloader(month, currentGen, currentTier, defaultRating = '1695') {
+  // Stop any existing preloader
+  stopIdlePreloader();
+
+  idleQueue = [];
+  idleActive = true;
+
+  // Get all months
+  const months = [month]; // Just preload current month — other month is lower priority
+
+  for (const m of months) {
+    // Priority 1: Other tiers in the same gen (most likely switch)
+    for (const tier of POPULAR_TIERS) {
+      if (tier === currentTier) continue;
+      idleQueue.push({ month: m, format: `gen${currentGen}${tier}`, rating: defaultRating });
+    }
+
+    // Priority 2: Same tier in neighboring gens
+    for (let gen = 9; gen >= 1; gen--) {
+      if (gen === currentGen) continue;
+      idleQueue.push({ month: m, format: `gen${gen}${currentTier}`, rating: defaultRating });
+    }
+
+    // Priority 3: Popular combos in other gens (OU is the most common)
+    const popularTierSubset = ['ou', 'uu', 'ubers', 'doublesou'];
+    for (let gen = 9; gen >= 1; gen--) {
+      if (gen === currentGen) continue;
+      for (const tier of popularTierSubset) {
+        if (tier === currentTier) continue; // already queued in Priority 2
+        idleQueue.push({ month: m, format: `gen${gen}${tier}`, rating: defaultRating });
+      }
+    }
+  }
+
+  // Deduplicate
+  const seen = new Set();
+  idleQueue = idleQueue.filter(item => {
+    const key = `${item.month}:${item.format}:${item.rating}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  // Start processing
+  scheduleIdle();
+}
+
+/**
+ * Stop the idle preloader.
+ */
+export function stopIdlePreloader() {
+  idleActive = false;
+  if (idlePreloaderHandle) {
+    if (typeof cancelIdleCallback !== 'undefined') {
+      cancelIdleCallback(idlePreloaderHandle);
+    } else {
+      clearTimeout(idlePreloaderHandle);
+    }
+    idlePreloaderHandle = null;
+  }
+  idleQueue = [];
+}

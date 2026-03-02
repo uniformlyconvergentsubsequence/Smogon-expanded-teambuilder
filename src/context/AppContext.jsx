@@ -1,6 +1,6 @@
 import { createContext, useContext, useReducer, useState, useEffect, useCallback } from 'react';
 import { DEFAULT_FORMAT, RATING_CUTOFFS } from '../data/formats';
-import { fetchAvailableRatings, preloadRatings } from '../services/smogonApi';
+import { fetchAvailableRatings, preloadRatings, startIdlePreloader, stopIdlePreloader } from '../services/smogonApi';
 
 const AppContext = createContext(null);
 
@@ -92,6 +92,14 @@ export function AppProvider({ children }) {
         preloadRatings(state.format.month, formatId, ratings);
       }
 
+      // Start idle preloader for other formats (runs during browser idle time)
+      startIdlePreloader(
+        state.format.month,
+        state.format.gen,
+        state.format.tier,
+        state.format.rating
+      );
+
       // If we got ratings back and the current rating isn't in the list, auto-correct
       if (ratings && ratings.length > 0 && !ratings.includes(state.format.rating)) {
         // Pick the highest available rating (most useful default)
@@ -105,7 +113,7 @@ export function AppProvider({ children }) {
       }
     });
 
-    return () => { cancelled = true; };
+    return () => { cancelled = true; stopIdlePreloader(); };
   }, [state.format.month, formatId]);
 
   // Compute the filtered rating cutoffs to pass down
