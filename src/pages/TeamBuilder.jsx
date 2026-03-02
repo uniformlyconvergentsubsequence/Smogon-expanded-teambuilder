@@ -235,6 +235,11 @@ export default function TeamBuilder() {
         ))}
       </div>
 
+      {/* Suggest Partners */}
+      {teamMembers.length >= 1 && teamMembers.length < 6 && chaosData && (
+        <SuggestPartnersPanel chaosData={chaosData} teamMembers={teamMembers} formatId={formatId} />
+      )}
+
       {/* Type Analysis */}
       {showAnalysis && teamMembers.length >= 1 && (
         <TypeAnalysisPanel teamMembers={teamMembers} />
@@ -406,6 +411,15 @@ function PokemonEditorModal({ slot, slotIndex, chaosData, format, formatId, onSa
     }));
   }, [pokemonChaos]);
 
+  const popularTeammates = useMemo(() => {
+    if (!pokemonChaos?.Teammates) return [];
+    const entries = sortByValue(pokemonChaos.Teammates);
+    const denom = entries.reduce((s, [, v]) => s + v, 0) || 1;
+    return entries.map(([name, val]) => ({
+      name, pct: (val / denom) * 100,
+    }));
+  }, [pokemonChaos]);
+
   // Select a Pokemon — fills ability, item, spread, tera but NOT moves
   function selectPokemon(name) {
     const data = chaosData ? getPokemonFromChaos(chaosData, name) : null;
@@ -472,6 +486,7 @@ function PokemonEditorModal({ slot, slotIndex, chaosData, format, formatId, onSa
     { id: 'item', label: '🎒 Item' },
     ...(format.gen >= 9 ? [{ id: 'tera', label: '💎 Tera' }] : []),
     { id: 'spreads', label: '📊 Spreads' },
+    { id: 'partners', label: '🤝 Partners' },
     { id: 'strategy', label: '📖 Strategy' },
   ];
 
@@ -789,6 +804,46 @@ function PokemonEditorModal({ slot, slotIndex, chaosData, format, formatId, onSa
               )}
             </div>
           )}
+          {/* ========== PARTNERS TAB ========== */}
+          {activeTab === 'partners' && (
+            <div>
+              {!pokemon.species ? (
+                <EmptyState text="Select a Pokémon first." />
+              ) : (
+                <div>
+                  <p className="text-xs text-slate-500 mb-3">
+                    Most common teammates for {pokemon.species} in {formatId}.
+                  </p>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase mb-2">
+                    Popular Partners ({popularTeammates.length})
+                  </label>
+                  <div className="space-y-0.5 max-h-[60vh] overflow-y-auto">
+                    {popularTeammates.length > 0 ? (
+                      popularTeammates.slice(0, 25).map((tm, i) => {
+                        const sprite = `https://play.pokemonshowdown.com/sprites/dex/${tm.name.toLowerCase().replace(/[^a-z0-9]/g, '')}.png`;
+                        return (
+                          <div key={tm.name}
+                            className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm hover:bg-slate-800 transition-colors"
+                          >
+                            <span className="text-xs text-slate-600 w-5 text-right">{i + 1}</span>
+                            <img src={sprite} alt="" className="w-8 h-8 object-contain flex-shrink-0"
+                              onError={e => { e.target.style.display = 'none'; }} />
+                            <span className="flex-1 text-white">{tm.name}</span>
+                            <UsageBar pct={tm.pct} color="blue" />
+                            <span className="text-xs font-mono text-slate-500 w-16 text-right">
+                              {tm.pct.toFixed(1)}%
+                            </span>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <EmptyState text="No teammate data available for this Pokémon." />
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           {/* ========== STRATEGY TAB ========== */}
           {activeTab === 'strategy' && (
             <StrategyTab
@@ -1004,6 +1059,71 @@ function ImportModal({ onImport, onClose }) {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ===================== Suggest Partners Panel =====================
+function SuggestPartnersPanel({ chaosData, teamMembers, formatId }) {
+  const [open, setOpen] = useState(false);
+
+  const suggestions = useMemo(() => {
+    if (!chaosData || teamMembers.length === 0) return [];
+    const onTeam = new Set(teamMembers.map(m => m.species));
+    const scores = {};
+
+    for (const member of teamMembers) {
+      const data = getPokemonFromChaos(chaosData, member.species);
+      if (!data?.Teammates) continue;
+      for (const [name, val] of Object.entries(data.Teammates)) {
+        if (onTeam.has(name)) continue;
+        scores[name] = (scores[name] || 0) + val;
+      }
+    }
+
+    return Object.entries(scores)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 15)
+      .map(([name, score]) => ({ name, score }));
+  }, [chaosData, teamMembers]);
+
+  const maxScore = suggestions[0]?.score || 1;
+
+  if (suggestions.length === 0) return null;
+
+  return (
+    <div className="glass-panel p-4 animate-fade-in">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between text-sm font-semibold text-white hover:text-blue-400 transition-colors"
+      >
+        <span>🤝 Suggest Partners ({teamMembers.length}/6 slots filled)</span>
+        <span className="text-xs text-slate-500">{open ? '▲ Hide' : '▼ Show'}</span>
+      </button>
+      {open && (
+        <div className="mt-3 space-y-0.5 max-h-96 overflow-y-auto">
+          <p className="text-xs text-slate-500 mb-2">
+            Combined teammate synergy across your current team in {formatId}.
+          </p>
+          {suggestions.map((s, i) => {
+            const sprite = `https://play.pokemonshowdown.com/sprites/dex/${s.name.toLowerCase().replace(/[^a-z0-9]/g, '')}.png`;
+            const barPct = (s.score / maxScore) * 100;
+            return (
+              <div key={s.name}
+                className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm hover:bg-slate-800/60 transition-colors"
+              >
+                <span className="text-xs text-slate-600 w-5 text-right">{i + 1}</span>
+                <img src={sprite} alt="" className="w-8 h-8 object-contain flex-shrink-0"
+                  onError={e => { e.target.style.display = 'none'; }} />
+                <span className="flex-1 text-white">{s.name}</span>
+                <div className="w-24 h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                  <div className="h-full bg-blue-500 rounded-full" style={{ width: `${barPct}%` }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
