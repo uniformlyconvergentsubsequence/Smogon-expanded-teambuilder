@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { useTeam } from '../context/TeamContext';
 import { fetchChaosData, getPokemonFromChaos } from '../services/smogonApi';
-import { getPokemonData } from '../services/showdownData';
+import { getPokemonData, formatMoveName, formatItemName, formatAbilityName, formatTypeName } from '../services/showdownData';
 import { TypeBadgeRow } from '../components/TypeBadge';
 import TypeBadge from '../components/TypeBadge';
 import { BaseStatBar } from '../components/StatBar';
@@ -84,12 +84,12 @@ export default function PokemonDetail() {
   function addToTeam() {
     if (!pokemonInfo) return;
 
-    const topAbility = sortByValue(pokemonInfo.Abilities || {})[0]?.[0] || '';
-    const topItem = sortByValue(pokemonInfo.Items || {})[0]?.[0] || '';
-    const topMoves = sortByValue(pokemonInfo.Moves || {}).slice(0, 4).map(([name]) => name);
+    const topAbility = formatAbilityName(sortByValue(pokemonInfo.Abilities || {})[0]?.[0] || '');
+    const topItem = formatItemName(sortByValue(pokemonInfo.Items || {})[0]?.[0] || '');
+    const topMoves = sortByValue(pokemonInfo.Moves || {}).slice(0, 4).map(([name]) => formatMoveName(name));
     const topSpread = sortByValue(pokemonInfo.Spreads || {})[0]?.[0] || '';
     const spread = parseSpread(topSpread);
-    const topTera = pokemonInfo['Tera Types'] ? sortByValue(pokemonInfo['Tera Types'])[0]?.[0] || '' : '';
+    const topTera = pokemonInfo['Tera Types'] ? formatTypeName(sortByValue(pokemonInfo['Tera Types'])[0]?.[0] || '') : '';
 
     const newPokemon = {
       species: pokemonName,
@@ -247,17 +247,17 @@ export default function PokemonDetail() {
           <div className="grid lg:grid-cols-2 gap-6">
             {/* Moves */}
             {(activeSection === 'overview' || activeSection === 'moves') && pokemonInfo.Moves && (
-              <DataSection title="🎯 Moves" data={pokemonInfo.Moves} color="blue" />
+              <DataSection title="🎯 Moves" data={pokemonInfo.Moves} rawCount={pokemonInfo['Raw count']} color="blue" nameFormatter={formatMoveName} />
             )}
 
             {/* Abilities */}
             {(activeSection === 'overview' || activeSection === 'items') && pokemonInfo.Abilities && (
-              <DataSection title="⚡ Abilities" data={pokemonInfo.Abilities} color="violet" />
+              <DataSection title="⚡ Abilities" data={pokemonInfo.Abilities} rawCount={pokemonInfo['Raw count']} color="violet" nameFormatter={formatAbilityName} />
             )}
 
             {/* Items */}
             {(activeSection === 'overview' || activeSection === 'items') && pokemonInfo.Items && (
-              <DataSection title="🎒 Items" data={pokemonInfo.Items} color="amber" />
+              <DataSection title="🎒 Items" data={pokemonInfo.Items} rawCount={pokemonInfo['Raw count']} color="amber" nameFormatter={formatItemName} />
             )}
 
             {/* Tera Types */}
@@ -265,17 +265,24 @@ export default function PokemonDetail() {
               <div className="glass-panel p-5">
                 <h3 className="font-semibold text-white mb-4 text-sm">✨ Tera Types</h3>
                 <div className="space-y-2">
-                  {sortByValue(pokemonInfo['Tera Types']).slice(0, 10).map(([name, value]) => (
-                    <div key={name} className="flex items-center gap-3">
-                      <TypeBadge type={name} size="xs" className="w-20" />
-                      <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                        <div className="h-full bg-pink-500 rounded-full" style={{ width: `${value * 100}%` }} />
+                  {sortByValue(pokemonInfo['Tera Types']).slice(0, 10).map(([name, value]) => {
+                    const pct = pokemonInfo['Raw count'] ? (value / pokemonInfo['Raw count']) * 100 : 0;
+                    const maxPct = sortByValue(pokemonInfo['Tera Types'])[0]?.[1]
+                      ? (sortByValue(pokemonInfo['Tera Types'])[0][1] / (pokemonInfo['Raw count'] || 1)) * 100
+                      : 100;
+                    const displayName = formatTypeName(name);
+                    return (
+                      <div key={name} className="flex items-center gap-3">
+                        <TypeBadge type={displayName} size="xs" className="w-20" />
+                        <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                          <div className="h-full bg-pink-500 rounded-full" style={{ width: `${maxPct > 0 ? (pct / maxPct) * 100 : 0}%` }} />
+                        </div>
+                        <span className="text-xs font-mono text-slate-300 w-14 text-right">
+                          {pct.toFixed(1)}%
+                        </span>
                       </div>
-                      <span className="text-xs font-mono text-slate-300 w-14 text-right">
-                        {(value * 100).toFixed(1)}%
-                      </span>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -287,11 +294,12 @@ export default function PokemonDetail() {
                 <div className="space-y-2.5">
                   {sortByValue(pokemonInfo.Spreads).slice(0, 8).map(([spread, value]) => {
                     const parsed = parseSpread(spread);
+                    const pct = pokemonInfo['Raw count'] ? (value / pokemonInfo['Raw count']) * 100 : 0;
                     return (
                       <div key={spread} className="bg-slate-800/40 rounded-lg p-3">
                         <div className="flex items-center justify-between mb-1">
                           <span className="text-sm font-medium text-white">{parsed?.nature || 'Unknown'} Nature</span>
-                          <span className="text-xs font-mono text-blue-400">{(value * 100).toFixed(1)}%</span>
+                          <span className="text-xs font-mono text-blue-400">{pct.toFixed(1)}%</span>
                         </div>
                         {parsed?.evs && (
                           <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-slate-400 font-mono">
@@ -314,25 +322,29 @@ export default function PokemonDetail() {
               <div className="glass-panel p-5">
                 <h3 className="font-semibold text-white mb-4 text-sm">🤝 Common Teammates</h3>
                 <div className="space-y-2">
-                  {sortByValue(pokemonInfo.Teammates).slice(0, 12).map(([name, value]) => (
-                    <Link
-                      key={name}
-                      to={`/stats/${encodeURIComponent(name)}`}
-                      className="flex items-center gap-3 group hover:bg-slate-800/40 rounded-lg p-1.5 -mx-1.5 transition-colors"
-                    >
-                      <img
-                        src={`https://play.pokemonshowdown.com/sprites/dex/${name.toLowerCase().replace(/[^a-z0-9]/g, '')}.png`}
-                        alt={name}
-                        className="w-8 h-8 object-contain"
-                        loading="lazy"
-                        onError={e => { e.target.style.display = 'none'; }}
-                      />
-                      <span className="text-sm text-slate-300 group-hover:text-white transition-colors flex-1">{name}</span>
-                      <span className={`text-xs font-mono ${value >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {value >= 0 ? '+' : ''}{(value * 100).toFixed(1)}%
-                      </span>
-                    </Link>
-                  ))}
+                  {sortByValue(pokemonInfo.Teammates).slice(0, 12).map(([name, value]) => {
+                    // Teammate values are differential weighted counts, normalize to percentage
+                    const pct = pokemonInfo['Raw count'] ? (value / pokemonInfo['Raw count']) * 100 : value * 100;
+                    return (
+                      <Link
+                        key={name}
+                        to={`/stats/${encodeURIComponent(name)}`}
+                        className="flex items-center gap-3 group hover:bg-slate-800/40 rounded-lg p-1.5 -mx-1.5 transition-colors"
+                      >
+                        <img
+                          src={`https://play.pokemonshowdown.com/sprites/dex/${name.toLowerCase().replace(/[^a-z0-9]/g, '')}.png`}
+                          alt={name}
+                          className="w-8 h-8 object-contain"
+                          loading="lazy"
+                          onError={e => { e.target.style.display = 'none'; }}
+                        />
+                        <span className="text-sm text-slate-300 group-hover:text-white transition-colors flex-1">{name}</span>
+                        <span className={`text-xs font-mono ${pct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                          {pct >= 0 ? '+' : ''}{pct.toFixed(1)}%
+                        </span>
+                      </Link>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -378,22 +390,41 @@ export default function PokemonDetail() {
   );
 }
 
-function DataSection({ title, data, color = 'blue', maxItems = 15 }) {
+function DataSection({ title, data, rawCount, color = 'blue', maxItems = 15, nameFormatter }) {
   const sorted = sortByValue(data);
-  const maxVal = sorted.length > 0 ? sorted[0][1] : 1;
+  // Normalize values: divide by rawCount to get percentages
+  const normalized = sorted.map(([name, value]) => {
+    const pct = rawCount ? (value / rawCount) * 100 : value;
+    const displayName = nameFormatter ? nameFormatter(name) : name;
+    return [displayName, pct];
+  });
+  const maxVal = normalized.length > 0 ? normalized[0][1] : 1;
 
   return (
     <div className="glass-panel p-5">
       <h3 className="font-semibold text-white mb-4 text-sm">{title}</h3>
       <div className="space-y-1.5">
-        {sorted.slice(0, maxItems).map(([name, value]) => (
-          <StatBar
-            key={name}
-            label={name}
-            value={value}
-            maxValue={maxVal}
-            color={color}
-          />
+        {normalized.slice(0, maxItems).map(([name, value]) => (
+          <div key={name} className="flex items-center gap-3">
+            <span className="text-sm text-slate-400 w-28 truncate flex-shrink-0" title={name}>
+              {name}
+            </span>
+            <div className="flex-1 h-2 bg-slate-800 rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all duration-700 ease-out ${
+                  color === 'blue' ? 'bg-blue-500' :
+                  color === 'violet' ? 'bg-violet-500' :
+                  color === 'amber' ? 'bg-amber-500' :
+                  color === 'green' ? 'bg-emerald-500' :
+                  'bg-blue-500'
+                }`}
+                style={{ width: `${maxVal > 0 ? (value / maxVal) * 100 : 0}%` }}
+              />
+            </div>
+            <span className="text-sm font-mono text-slate-300 w-16 text-right flex-shrink-0">
+              {value.toFixed(1)}%
+            </span>
+          </div>
         ))}
       </div>
     </div>

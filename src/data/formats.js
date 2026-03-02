@@ -62,21 +62,10 @@ export const STAT_CATEGORIES = [
 
 // Generate available months dynamically
 export function getAvailableMonths() {
-  const months = [];
-  const now = new Date(2026, 2, 1); // March 2026 (current date)
-
-  for (let i = 0; i < 60; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - 1 - i, 1);
-    if (d.getFullYear() < 2014 || (d.getFullYear() === 2014 && d.getMonth() < 10)) break;
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    months.push({
-      id: `${year}-${month}`,
-      name: `${d.toLocaleString('en', { month: 'long' })} ${year}`,
-    });
-  }
-
-  return months;
+  return [
+    { id: '2026-02', name: 'February 2026' },
+    { id: '2026-01', name: 'January 2026' },
+  ];
 }
 
 export const NATURES = [

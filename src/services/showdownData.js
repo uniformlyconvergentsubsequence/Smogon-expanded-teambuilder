@@ -44,14 +44,32 @@ export async function fetchMoves() {
 }
 
 /**
- * Fetch and cache items data
+ * Parse a Showdown .js data file that exports a variable like:
+ * exports.BattleItems = { ... };
+ */
+function parseShowdownJS(text) {
+  // Strip the "exports.VariableName = " prefix and trailing semicolon
+  const match = text.match(/^[^=]+=\s*(.+);?\s*$/s);
+  if (!match) return {};
+  try {
+    // The data is valid JS object literal — use Function constructor to evaluate
+    return new Function('return ' + match[1].replace(/;\s*$/, ''))();
+  } catch (e) {
+    console.error('Failed to parse Showdown JS data:', e);
+    return {};
+  }
+}
+
+/**
+ * Fetch and cache items data (.js format — .json is 404)
  */
 export async function fetchItems() {
   if (itemsCache) return itemsCache;
 
   try {
-    const response = await fetch(`${SHOWDOWN_DATA_BASE}/items.json`);
-    const data = await response.json();
+    const response = await fetch(`${SHOWDOWN_DATA_BASE}/items.js`);
+    const text = await response.text();
+    const data = parseShowdownJS(text);
     itemsCache = data;
     return data;
   } catch (e) {
@@ -61,14 +79,15 @@ export async function fetchItems() {
 }
 
 /**
- * Fetch and cache abilities data
+ * Fetch and cache abilities data (.js format — .json is 404)
  */
 export async function fetchAbilities() {
   if (abilitiesCache) return abilitiesCache;
 
   try {
-    const response = await fetch(`${SHOWDOWN_DATA_BASE}/abilities.json`);
-    const data = await response.json();
+    const response = await fetch(`${SHOWDOWN_DATA_BASE}/abilities.js`);
+    const text = await response.text();
+    const data = parseShowdownJS(text);
     abilitiesCache = data;
     return data;
   } catch (e) {
@@ -248,6 +267,80 @@ function toShowdownId(name) {
   return name
     .toLowerCase()
     .replace(/[^a-z0-9]/g, '');
+}
+
+// ===== Name formatting: convert lowercase IDs (from chaos JSON) to proper display names =====
+
+// Build reverse-lookup maps from Showdown data (id → proper name)
+let moveNameMap = null;
+let itemNameMap = null;
+let abilityNameMap = null;
+let nameMapsReady = false;
+
+/**
+ * Pre-load all name maps. Call this once at app startup.
+ */
+export async function preloadNameMaps() {
+  if (nameMapsReady) return;
+  const [moves, items, abilities] = await Promise.all([
+    fetchMoves(),
+    fetchItems(),
+    fetchAbilities(),
+  ]);
+  moveNameMap = {};
+  for (const [id, data] of Object.entries(moves)) {
+    if (data.name) moveNameMap[id] = data.name;
+  }
+  itemNameMap = {};
+  for (const [id, data] of Object.entries(items)) {
+    if (data.name) itemNameMap[id] = data.name;
+  }
+  abilityNameMap = {};
+  for (const [id, data] of Object.entries(abilities)) {
+    if (data.name) abilityNameMap[id] = data.name;
+  }
+  nameMapsReady = true;
+}
+
+/**
+ * Fallback: capitalize a lowercase ID into a display name
+ * e.g. "rapidspin" → "Rapidspin" (not perfect, but better than lowercase)
+ */
+function fallbackCapitalize(id) {
+  if (!id) return '';
+  return id.charAt(0).toUpperCase() + id.slice(1);
+}
+
+/**
+ * Sync: Convert a move ID (from chaos JSON) to its proper display name
+ */
+export function formatMoveName(id) {
+  if (!id) return '';
+  return moveNameMap?.[id] || fallbackCapitalize(id);
+}
+
+/**
+ * Sync: Convert an item ID (from chaos JSON) to its proper display name
+ */
+export function formatItemName(id) {
+  if (!id) return '';
+  return itemNameMap?.[id] || fallbackCapitalize(id);
+}
+
+/**
+ * Sync: Convert an ability ID (from chaos JSON) to its proper display name
+ */
+export function formatAbilityName(id) {
+  if (!id) return '';
+  return abilityNameMap?.[id] || fallbackCapitalize(id);
+}
+
+/**
+ * Convert a tera/type ID to proper display name (simple capitalize)
+ */
+export function formatTypeName(id) {
+  if (!id) return '';
+  return id.charAt(0).toUpperCase() + id.slice(1);
 }
 
 /**

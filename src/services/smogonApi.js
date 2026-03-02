@@ -4,10 +4,18 @@
  */
 
 const SMOGON_STATS_BASE = 'https://www.smogon.com/stats';
-const CORS_PROXIES = [
-  '',
-  'https://corsproxy.io/?',
-];
+
+// In development, Vite proxies /smogon-stats to Smogon's server, avoiding CORS.
+// In production, we fall back to CORS proxies.
+const isDev = import.meta.env.DEV;
+
+const CORS_PROXIES = isDev
+  ? ['']  // In dev, just use the proxy path (set below)
+  : [
+      'https://corsproxy.io/?',
+      'https://api.allorigins.win/raw?url=',
+      'https://api.codetabs.com/v1/proxy?quest=',
+    ];
 
 const cache = new Map();
 const CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
@@ -16,11 +24,24 @@ const CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
  * Fetch with CORS proxy fallback
  */
 async function fetchWithFallback(url) {
+  // In dev mode, rewrite Smogon stats URLs to use the Vite proxy
+  if (isDev && url.startsWith(SMOGON_STATS_BASE)) {
+    const proxyUrl = url.replace(SMOGON_STATS_BASE, '/smogon-stats');
+    try {
+      const response = await fetch(proxyUrl, {
+        signal: AbortSignal.timeout(30000),
+      });
+      if (response.ok) return response;
+    } catch (e) {
+      console.warn('Dev proxy failed, trying direct:', e.message);
+    }
+  }
+
   for (const proxy of CORS_PROXIES) {
     try {
       const fullUrl = proxy ? `${proxy}${encodeURIComponent(url)}` : url;
       const response = await fetch(fullUrl, {
-        signal: AbortSignal.timeout(15000),
+        signal: AbortSignal.timeout(10000),
       });
       if (response.ok) return response;
     } catch (e) {
@@ -144,8 +165,8 @@ function parseUsageStats(text) {
       pokemon.push({
         rank: parseInt(rowMatch[1], 10),
         name: rowMatch[2].trim(),
-        usage: parseFloat(rowMatch[3]),
-        raw: parseInt(rowMatch[4], 10),
+        usage: parseFloat(rowMatch[3]) / 100,  // Convert from percentage to 0-1 fraction
+        rawCount: parseInt(rowMatch[4], 10),
         rawPercent: parseFloat(rowMatch[5]),
       });
     }

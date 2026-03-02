@@ -1,27 +1,48 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useTeam } from '../context/TeamContext';
 import { useApp } from '../context/AppContext';
-import { exportTeamToShowdown, importTeamFromShowdown, createEmptyPokemon } from '../utils/exportShowdown';
-import { searchPokemon, searchMoves, searchItems, getPokemonAbilities, getPokemonTypes } from '../services/showdownData';
+import { exportTeamToShowdown, importTeamFromShowdown, createEmptyPokemon, createEmptyTeam } from '../utils/exportShowdown';
+import { fetchChaosData, getPokemonFromChaos, getUsageListFromChaos } from '../services/smogonApi';
+import { getPokemonTypes, formatMoveName, formatItemName, formatAbilityName, formatTypeName } from '../services/showdownData';
 import { TypeBadgeRow } from '../components/TypeBadge';
 import TypeBadge from '../components/TypeBadge';
-import { BaseStatBar } from '../components/StatBar';
+import FormatSelector from '../components/FormatSelector';
 import { NATURES, ALL_TYPES } from '../data/formats';
-import { getTypeMatchups, TYPE_LIST } from '../data/typeChart';
 import { generateTypeMatrix, calculateSynergyScore, getTeamWeaknesses } from '../utils/typeAnalysis';
-import { getEffectivenessClass, getEffectivenessLabel, debounce } from '../utils/helpers';
+import { getEffectivenessClass, getEffectivenessLabel, sortByValue, parseSpread } from '../utils/helpers';
 
 export default function TeamBuilder() {
   const {
     teams, currentTeamIndex, currentTeam,
     setPokemon, clearSlot, setTeamName, addTeam, deleteTeam, selectTeam, importTeam
   } = useTeam();
-  const { format } = useApp();
+  const { format, formatId } = useApp();
   const [editingSlot, setEditingSlot] = useState(null);
   const [showExport, setShowExport] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showAnalysis, setShowAnalysis] = useState(false);
   const [teamTypes, setTeamTypes] = useState({});
+
+  // Chaos data for the current format
+  const [chaosData, setChaosData] = useState(null);
+  const [chaosLoading, setChaosLoading] = useState(false);
+
+  // Fetch chaos data for the selected format
+  useEffect(() => {
+    let cancelled = false;
+    setChaosLoading(true);
+    fetchChaosData(format.month, formatId, format.rating)
+      .then(data => {
+        if (!cancelled) setChaosData(data);
+      })
+      .catch(() => {
+        if (!cancelled) setChaosData(null);
+      })
+      .finally(() => {
+        if (!cancelled) setChaosLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [format.month, formatId, format.rating]);
 
   // Fetch types for team members
   useEffect(() => {
@@ -59,7 +80,7 @@ export default function TeamBuilder() {
         <div>
           <h1 className="text-2xl font-bold text-white mb-1">Team Builder</h1>
           <p className="text-sm text-slate-400">
-            Build your team and export to Pokémon Showdown format.
+            Build a team for <span className="text-blue-400 font-medium">{formatId}</span> — suggestions powered by usage stats.
           </p>
         </div>
 
@@ -74,6 +95,16 @@ export default function TeamBuilder() {
           </button>
         </div>
       </div>
+
+      {/* Format selector */}
+      <FormatSelector className="mb-6" />
+
+      {chaosLoading && (
+        <div className="mb-4 flex items-center gap-2 text-sm text-slate-500">
+          <div className="w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+          Loading format data...
+        </div>
+      )}
 
       {/* Team selector tabs */}
       <div className="flex items-center gap-2 mb-6 overflow-x-auto pb-2">
@@ -157,6 +188,9 @@ export default function TeamBuilder() {
         <PokemonEditorModal
           slot={currentTeam.pokemon[editingSlot]}
           slotIndex={editingSlot}
+          chaosData={chaosData}
+          format={format}
+          formatId={formatId}
           onSave={(pokemon) => { setPokemon(editingSlot, pokemon); setEditingSlot(null); }}
           onClose={() => setEditingSlot(null)}
         />
@@ -164,10 +198,7 @@ export default function TeamBuilder() {
 
       {/* Export Modal */}
       {showExport && (
-        <ExportModal
-          team={currentTeam}
-          onClose={() => setShowExport(false)}
-        />
+        <ExportModal team={currentTeam} onClose={() => setShowExport(false)} />
       )}
 
       {/* Import Modal */}
@@ -181,6 +212,7 @@ export default function TeamBuilder() {
   );
 }
 
+// ===================== Team Slot Card =====================
 function TeamSlotCard({ slot, index, types, onEdit, onClear }) {
   const isEmpty = !slot.species;
   const spriteUrl = slot.species
@@ -189,7 +221,7 @@ function TeamSlotCard({ slot, index, types, onEdit, onClear }) {
 
   return (
     <div
-      className={`glass-panel p-4 transition-all duration-200 group
+      className={`glass-panel p-4 transition-all duration-200 group cursor-pointer
         ${isEmpty ? 'border-dashed border-slate-700/50 hover:border-slate-600' : 'card-hover'}`}
       onClick={onEdit}
     >
@@ -239,71 +271,124 @@ function TeamSlotCard({ slot, index, types, onEdit, onClear }) {
   );
 }
 
-function PokemonEditorModal({ slot, slotIndex, onSave, onClose }) {
+// ===================== Pokemon Editor Modal (Stats-Driven) =====================
+function PokemonEditorModal({ slot, slotIndex, chaosData, format, formatId, onSave, onClose }) {
   const [pokemon, setPokemonState] = useState({ ...createEmptyPokemon(), ...slot });
+  const [activeTab, setActiveTab] = useState(slot.species ? 'moves' : 'pokemon');
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState([]);
-  const [moveSearches, setMoveSearches] = useState(['', '', '', '']);
-  const [moveResults, setMoveResults] = useState([[], [], [], []]);
-  const [itemSearch, setItemSearch] = useState('');
-  const [itemResults, setItemResults] = useState([]);
-  const [availableAbilities, setAvailableAbilities] = useState([]);
-  const [activeTab, setActiveTab] = useState('basic');
+  const [pokemonChaos, setPokemonChaos] = useState(null);
 
-  // Search Pokemon
-  useEffect(() => {
-    if (searchQuery.length < 2) { setSearchResults([]); return; }
-    const timer = setTimeout(async () => {
-      const results = await searchPokemon(searchQuery);
-      setSearchResults(results);
-    }, 200);
-    return () => clearTimeout(timer);
-  }, [searchQuery]);
+  // Usage-sorted Pokemon list from chaos data
+  const usageList = useMemo(() => {
+    if (!chaosData) return [];
+    return getUsageListFromChaos(chaosData);
+  }, [chaosData]);
 
-  // Load abilities when species changes
+  // Filter by search
+  const filteredPokemon = useMemo(() => {
+    if (!searchQuery) return usageList.slice(0, 60);
+    const q = searchQuery.toLowerCase();
+    return usageList.filter(p => p.name.toLowerCase().includes(q)).slice(0, 60);
+  }, [usageList, searchQuery]);
+
+  // Load chaos data for selected pokemon
   useEffect(() => {
-    if (pokemon.species) {
-      getPokemonAbilities(pokemon.species).then(setAvailableAbilities);
+    if (pokemon.species && chaosData) {
+      const data = getPokemonFromChaos(chaosData, pokemon.species);
+      setPokemonChaos(data);
+    } else {
+      setPokemonChaos(null);
     }
-  }, [pokemon.species]);
+  }, [pokemon.species, chaosData]);
 
-  function selectPokemon(p) {
-    setPokemonState(prev => ({ ...prev, species: p.name }));
+  // Compute sorted stats lists
+  const rawCount = pokemonChaos?.['Raw count'] || 1;
+
+  const popularMoves = useMemo(() => {
+    if (!pokemonChaos?.Moves) return [];
+    return sortByValue(pokemonChaos.Moves).map(([name, val]) => ({
+      name: formatMoveName(name), pct: (val / rawCount) * 100,
+    }));
+  }, [pokemonChaos, rawCount]);
+
+  const popularAbilities = useMemo(() => {
+    if (!pokemonChaos?.Abilities) return [];
+    return sortByValue(pokemonChaos.Abilities).map(([name, val]) => ({
+      name: formatAbilityName(name), pct: (val / rawCount) * 100,
+    }));
+  }, [pokemonChaos, rawCount]);
+
+  const popularItems = useMemo(() => {
+    if (!pokemonChaos?.Items) return [];
+    return sortByValue(pokemonChaos.Items).map(([name, val]) => ({
+      name: formatItemName(name), pct: (val / rawCount) * 100,
+    }));
+  }, [pokemonChaos, rawCount]);
+
+  const popularTeraTypes = useMemo(() => {
+    if (!pokemonChaos?.['Tera Types']) return [];
+    return sortByValue(pokemonChaos['Tera Types']).map(([name, val]) => ({
+      name: formatTypeName(name), pct: (val / rawCount) * 100,
+    }));
+  }, [pokemonChaos, rawCount]);
+
+  const popularSpreads = useMemo(() => {
+    if (!pokemonChaos?.Spreads) return [];
+    return sortByValue(pokemonChaos.Spreads).map(([name, val]) => ({
+      spread: name,
+      parsed: parseSpread(name),
+      pct: (val / rawCount) * 100,
+    }));
+  }, [pokemonChaos, rawCount]);
+
+  // Select a Pokemon — fills ability, item, spread, tera but NOT moves
+  function selectPokemon(name) {
+    const data = chaosData ? getPokemonFromChaos(chaosData, name) : null;
+    setPokemonChaos(data);
+
+    const newPoke = { ...createEmptyPokemon(), species: name };
+
+    if (data) {
+      const topAbility = formatAbilityName(sortByValue(data.Abilities || {})[0]?.[0] || '');
+      const topItem = formatItemName(sortByValue(data.Items || {})[0]?.[0] || '');
+      const topSpread = sortByValue(data.Spreads || {})[0]?.[0] || '';
+      const spread = parseSpread(topSpread);
+      const topTera = data['Tera Types'] ? formatTypeName(sortByValue(data['Tera Types'])[0]?.[0] || '') : '';
+
+      newPoke.ability = topAbility;
+      newPoke.item = topItem;
+      newPoke.nature = spread?.nature || '';
+      newPoke.evs = spread?.evs || { hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 };
+      newPoke.teraType = topTera;
+    }
+
+    setPokemonState(newPoke);
     setSearchQuery('');
-    setSearchResults([]);
+    setActiveTab('moves');
   }
 
-  function updateMove(index, value) {
-    const moves = [...pokemon.moves];
-    moves[index] = value;
-    setPokemonState(prev => ({ ...prev, moves }));
-  }
+  // Auto-fill the most popular full set (Shift+Enter shortcut)
+  function autoFillTopSet() {
+    if (!pokemon.species) return;
+    const data = pokemonChaos || (chaosData ? getPokemonFromChaos(chaosData, pokemon.species) : null);
+    if (!data) return;
 
-  async function searchMoveForSlot(index, query) {
-    const searches = [...moveSearches];
-    searches[index] = query;
-    setMoveSearches(searches);
+    const topAbility = formatAbilityName(sortByValue(data.Abilities || {})[0]?.[0] || '');
+    const topItem = formatItemName(sortByValue(data.Items || {})[0]?.[0] || '');
+    const topMoves = sortByValue(data.Moves || {}).slice(0, 4).map(([n]) => formatMoveName(n));
+    const topSpread = sortByValue(data.Spreads || {})[0]?.[0] || '';
+    const spread = parseSpread(topSpread);
+    const topTera = data['Tera Types'] ? formatTypeName(sortByValue(data['Tera Types'])[0]?.[0] || '') : '';
 
-    if (query.length < 2) {
-      const results = [...moveResults];
-      results[index] = [];
-      setMoveResults(results);
-      return;
-    }
-
-    const results = await searchMoves(query);
-    setMoveResults(prev => {
-      const newResults = [...prev];
-      newResults[index] = results;
-      return newResults;
-    });
-  }
-
-  async function searchItemFn(query) {
-    setItemSearch(query);
-    if (query.length < 2) { setItemResults([]); return; }
-    const results = await searchItems(query);
-    setItemResults(results);
+    setPokemonState(prev => ({
+      ...prev,
+      ability: topAbility,
+      item: topItem,
+      moves: [topMoves[0] || '', topMoves[1] || '', topMoves[2] || '', topMoves[3] || ''],
+      nature: spread?.nature || prev.nature,
+      evs: spread?.evs || prev.evs,
+      teraType: topTera,
+    }));
   }
 
   function updateEV(stat, value) {
@@ -314,31 +399,70 @@ function PokemonEditorModal({ slot, slotIndex, onSave, onClose }) {
     }));
   }
 
+  function applySpread(spreadData) {
+    if (!spreadData?.parsed) return;
+    setPokemonState(prev => ({
+      ...prev,
+      nature: spreadData.parsed.nature || prev.nature,
+      evs: spreadData.parsed.evs || prev.evs,
+    }));
+  }
+
   const totalEVs = Object.values(pokemon.evs).reduce((a, b) => a + b, 0);
 
   const EDIT_TABS = [
-    { id: 'basic', label: 'Basic' },
-    { id: 'moves', label: 'Moves' },
-    { id: 'evs', label: 'EVs/IVs' },
+    { id: 'pokemon', label: '🔍 Pokémon' },
+    { id: 'moves', label: '⚔️ Moves' },
+    { id: 'build', label: '🛠️ Build' },
+    { id: 'evs', label: '📊 EVs/IVs' },
   ];
+
+  // Global keyboard handler for Shift+Enter
+  useEffect(() => {
+    function handleKeyDown(e) {
+      if (e.shiftKey && e.key === 'Enter') {
+        e.preventDefault();
+        autoFillTopSet();
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [pokemon.species, pokemonChaos, chaosData]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
          onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="glass-panel w-full max-w-2xl max-h-[85vh] overflow-y-auto animate-slide-up">
+      <div className="glass-panel w-full max-w-3xl max-h-[90vh] overflow-y-auto animate-slide-up">
+        {/* Header */}
         <div className="sticky top-0 bg-slate-900 border-b border-slate-700/50 p-4 flex items-center justify-between z-10">
-          <h2 className="font-bold text-white">
-            {pokemon.species || `Slot ${slotIndex + 1}`}
-          </h2>
+          <div className="flex items-center gap-3">
+            {pokemon.species && (
+              <img
+                src={`https://play.pokemonshowdown.com/sprites/dex/${pokemon.species.toLowerCase().replace(/[^a-z0-9]/g, '')}.png`}
+                alt={pokemon.species}
+                className="w-10 h-10 object-contain"
+                onError={e => { e.target.style.display = 'none'; }}
+              />
+            )}
+            <div>
+              <h2 className="font-bold text-white">
+                {pokemon.species || `Slot ${slotIndex + 1}`}
+              </h2>
+              <p className="text-xs text-slate-500">{formatId} · {format.month}</p>
+            </div>
+          </div>
           <div className="flex items-center gap-2">
+            <button onClick={autoFillTopSet} className="btn-ghost text-xs text-slate-400 hover:text-white" title="Shift+Enter">
+              ⚡ Popular Set
+            </button>
             <button onClick={() => onSave(pokemon)} className="btn-primary text-sm">Save</button>
             <button onClick={onClose} className="btn-ghost text-sm">Cancel</button>
           </div>
         </div>
 
-        <div className="p-4">
-          {/* Tabs */}
-          <div className="flex gap-1 mb-4 bg-slate-800/50 p-1 rounded-lg">
+        {/* Tabs */}
+        <div className="sticky top-[73px] bg-slate-900/95 z-10 px-4 py-2 border-b border-slate-800">
+          <div className="flex gap-1 bg-slate-800/50 p-1 rounded-lg">
             {EDIT_TABS.map(tab => (
               <button
                 key={tab.id}
@@ -350,249 +474,315 @@ function PokemonEditorModal({ slot, slotIndex, onSave, onClose }) {
               </button>
             ))}
           </div>
+        </div>
 
-          {activeTab === 'basic' && (
-            <div className="space-y-4">
-              {/* Species Search */}
-              <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1">Pokémon</label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={searchQuery || pokemon.species}
-                    onChange={e => { setSearchQuery(e.target.value); }}
-                    onFocus={() => setSearchQuery(pokemon.species || '')}
-                    className="input-field"
-                    placeholder="Search Pokémon..."
+        <div className="p-4">
+          {/* ========== POKEMON TAB ========== */}
+          {activeTab === 'pokemon' && (
+            <div>
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                className="input-field mb-3"
+                placeholder="Search Pokémon by name..."
+                autoFocus
+              />
+              {!chaosData && (
+                <p className="text-sm text-amber-400 mb-3">
+                  ⚠️ Stats data not available for this format. Try changing format settings.
+                </p>
+              )}
+              <div className="text-xs text-slate-500 mb-2">
+                Sorted by usage in {formatId} · {format.month}
+                <span className="ml-2 text-slate-600">·</span>
+                <span className="ml-2 text-blue-400/70">Shift+Enter = auto-fill top set</span>
+              </div>
+              <div className="space-y-0.5 max-h-[50vh] overflow-y-auto">
+                {filteredPokemon.map((p, i) => (
+                  <PokemonPickerRow
+                    key={p.name}
+                    pokemon={p}
+                    rank={p.rank || i + 1}
+                    isSelected={pokemon.species === p.name}
+                    onClick={() => selectPokemon(p.name)}
                   />
-                  {searchResults.length > 0 && (
-                    <div className="absolute top-full left-0 right-0 mt-1 bg-slate-800 border border-slate-700 rounded-lg shadow-xl max-h-48 overflow-y-auto z-20">
-                      {searchResults.map(p => (
-                        <button
-                          key={p.id}
-                          onClick={() => selectPokemon(p)}
-                          className="w-full px-3 py-2 text-left text-sm hover:bg-slate-700 transition-colors flex items-center gap-2"
-                        >
-                          <img
-                            src={`https://play.pokemonshowdown.com/sprites/dex/${p.id}.png`}
-                            alt={p.name}
-                            className="w-8 h-8 object-contain"
-                            onError={e => { e.target.style.display = 'none'; }}
-                          />
-                          <span className="text-white">{p.name}</span>
-                          <TypeBadgeRow types={p.types} size="xs" className="ml-auto" />
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Item */}
-              <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1">Item</label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={itemSearch || pokemon.item}
-                    onChange={e => searchItemFn(e.target.value)}
-                    onFocus={() => setItemSearch(pokemon.item || '')}
-                    className="input-field"
-                    placeholder="Search items..."
-                  />
-                  {itemResults.length > 0 && (
-                    <div className="absolute top-full left-0 right-0 mt-1 bg-slate-800 border border-slate-700 rounded-lg shadow-xl max-h-48 overflow-y-auto z-20">
-                      {itemResults.map(item => (
-                        <button
-                          key={item.id}
-                          onClick={() => { setPokemonState(p => ({ ...p, item: item.name })); setItemSearch(''); setItemResults([]); }}
-                          className="w-full px-3 py-2 text-left text-sm hover:bg-slate-700 transition-colors"
-                        >
-                          <span className="text-white">{item.name}</span>
-                          {item.desc && <span className="text-xs text-slate-500 ml-2">{item.desc}</span>}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Ability */}
-              <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1">Ability</label>
-                <select
-                  value={pokemon.ability}
-                  onChange={e => setPokemonState(p => ({ ...p, ability: e.target.value }))}
-                  className="select-field"
-                >
-                  <option value="">Select ability...</option>
-                  {availableAbilities.map(a => (
-                    <option key={a} value={a}>{a}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Nature */}
-              <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1">Nature</label>
-                <select
-                  value={pokemon.nature}
-                  onChange={e => setPokemonState(p => ({ ...p, nature: e.target.value }))}
-                  className="select-field"
-                >
-                  <option value="">Select nature...</option>
-                  {NATURES.map(n => (
-                    <option key={n.name} value={n.name}>
-                      {n.name}{n.plus ? ` (+${n.plus.toUpperCase()} / -${n.minus.toUpperCase()})` : ' (Neutral)'}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Tera Type */}
-              <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1">Tera Type</label>
-                <select
-                  value={pokemon.teraType}
-                  onChange={e => setPokemonState(p => ({ ...p, teraType: e.target.value }))}
-                  className="select-field"
-                >
-                  <option value="">Select Tera Type...</option>
-                  {ALL_TYPES.map(t => (
-                    <option key={t} value={t}>{t}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Level */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-400 mb-1">Level</label>
-                  <input
-                    type="number"
-                    value={pokemon.level}
-                    onChange={e => setPokemonState(p => ({ ...p, level: parseInt(e.target.value) || 100 }))}
-                    className="input-field"
-                    min="1"
-                    max="100"
-                  />
-                </div>
-                <div className="flex items-end gap-4">
-                  <label className="flex items-center gap-2 text-sm text-slate-400 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={pokemon.shiny}
-                      onChange={e => setPokemonState(p => ({ ...p, shiny: e.target.checked }))}
-                      className="rounded border-slate-600"
-                    />
-                    Shiny
-                  </label>
-                </div>
+                ))}
+                {filteredPokemon.length === 0 && (
+                  <p className="text-sm text-slate-500 py-4 text-center">
+                    No Pokémon found.
+                  </p>
+                )}
               </div>
             </div>
           )}
 
+          {/* ========== MOVES TAB ========== */}
           {activeTab === 'moves' && (
-            <div className="space-y-4">
-              {[0, 1, 2, 3].map(i => (
-                <div key={i}>
-                  <label className="block text-xs font-medium text-slate-400 mb-1">Move {i + 1}</label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      value={moveSearches[i] || pokemon.moves[i] || ''}
-                      onChange={e => searchMoveForSlot(i, e.target.value)}
-                      onFocus={() => {
-                        const s = [...moveSearches];
-                        s[i] = pokemon.moves[i] || '';
-                        setMoveSearches(s);
-                      }}
-                      className="input-field"
-                      placeholder={`Move ${i + 1}...`}
-                    />
-                    {moveResults[i]?.length > 0 && (
-                      <div className="absolute top-full left-0 right-0 mt-1 bg-slate-800 border border-slate-700 rounded-lg shadow-xl max-h-48 overflow-y-auto z-20">
-                        {moveResults[i].map(move => (
+            <div>
+              {!pokemon.species ? (
+                <EmptyState text="Select a Pokémon first to see suggested moves." />
+              ) : (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-slate-500">
+                      Click a move to add it. Moves sorted by popularity in {formatId}.
+                    </p>
+                    <span className="text-xs text-blue-400/70">Shift+Enter = auto-fill top set</span>
+                  </div>
+
+                  {/* Current moves */}
+                  <div className="grid grid-cols-2 gap-2">
+                    {[0, 1, 2, 3].map(i => (
+                      <div key={i} className={`flex items-center gap-2 p-2 rounded-lg border
+                        ${pokemon.moves[i]
+                          ? 'bg-slate-800/60 border-slate-700'
+                          : 'bg-slate-900/40 border-dashed border-slate-700/50'}`}
+                      >
+                        <span className="text-xs text-slate-500 w-4">{i + 1}</span>
+                        <span className={`text-sm flex-1 ${pokemon.moves[i] ? 'text-white' : 'text-slate-600'}`}>
+                          {pokemon.moves[i] || 'Empty'}
+                        </span>
+                        {pokemon.moves[i] && (
                           <button
-                            key={move.id}
                             onClick={() => {
-                              updateMove(i, move.name);
-                              const s = [...moveSearches];
-                              s[i] = '';
-                              setMoveSearches(s);
-                              setMoveResults(prev => {
-                                const r = [...prev];
-                                r[i] = [];
-                                return r;
-                              });
+                              const moves = [...pokemon.moves];
+                              moves[i] = '';
+                              setPokemonState(prev => ({ ...prev, moves }));
                             }}
-                            className="w-full px-3 py-2 text-left text-sm hover:bg-slate-700 transition-colors flex items-center gap-2"
+                            className="text-slate-600 hover:text-red-400 text-xs"
                           >
-                            <TypeBadge type={move.type} size="xs" />
-                            <span className="text-white">{move.name}</span>
-                            <span className="text-xs text-slate-500 ml-auto">
-                              {move.category} · {move.basePower || '—'} BP
-                            </span>
+                            ✕
                           </button>
-                        ))}
+                        )}
                       </div>
-                    )}
+                    ))}
+                  </div>
+
+                  {/* Popular moves list */}
+                  <div>
+                    <h4 className="text-xs font-semibold text-slate-400 uppercase mb-2">
+                      Popular Moves ({popularMoves.length})
+                    </h4>
+                    <div className="space-y-0.5 max-h-[40vh] overflow-y-auto">
+                      {popularMoves.map(move => {
+                        const isSelected = pokemon.moves.includes(move.name);
+                        return (
+                          <button
+                            key={move.name}
+                            onClick={() => {
+                              if (isSelected) return;
+                              const moves = [...pokemon.moves];
+                              const emptyIdx = moves.findIndex(m => !m);
+                              if (emptyIdx !== -1) {
+                                moves[emptyIdx] = move.name;
+                                setPokemonState(prev => ({ ...prev, moves }));
+                              }
+                            }}
+                            disabled={isSelected}
+                            className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors
+                              ${isSelected
+                                ? 'bg-blue-900/30 border border-blue-700/30 text-blue-300'
+                                : 'hover:bg-slate-800 text-slate-300 hover:text-white'}`}
+                          >
+                            <span className="flex-1 text-left">{move.name}</span>
+                            <UsageBar pct={move.pct} color="blue" />
+                            <span className="text-xs font-mono text-slate-500 w-16 text-right">
+                              {move.pct.toFixed(1)}%
+                            </span>
+                            {isSelected && <span className="text-blue-400 text-xs">✓</span>}
+                          </button>
+                        );
+                      })}
+                      {popularMoves.length === 0 && (
+                        <EmptyState text="No move data available for this Pokémon in this format." />
+                      )}
+                    </div>
                   </div>
                 </div>
-              ))}
+              )}
             </div>
           )}
 
-          {activeTab === 'evs' && (
-            <div className="space-y-6">
-              {/* EVs */}
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <label className="text-xs font-semibold text-slate-300 uppercase">EVs</label>
-                  <span className={`text-xs font-mono ${totalEVs > 510 ? 'text-red-400' : 'text-slate-400'}`}>
-                    {totalEVs}/510
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                  {['hp', 'atk', 'def', 'spa', 'spd', 'spe'].map(stat => (
-                    <div key={stat}>
-                      <label className="block text-xs text-slate-500 mb-1 uppercase">{stat}</label>
-                      <input
-                        type="number"
-                        value={pokemon.evs[stat]}
-                        onChange={e => updateEV(stat, e.target.value)}
-                        className="input-field text-sm font-mono"
-                        min="0"
-                        max="252"
-                        step="4"
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
+          {/* ========== BUILD TAB ========== */}
+          {activeTab === 'build' && (
+            <div>
+              {!pokemon.species ? (
+                <EmptyState text="Select a Pokémon first." />
+              ) : (
+                <div className="space-y-5">
+                  {/* Ability */}
+                  <BuildSection title="Ability" items={popularAbilities} selected={pokemon.ability}
+                    onSelect={name => setPokemonState(p => ({ ...p, ability: name }))}
+                    color="violet"
+                    fallback={
+                      <input type="text" value={pokemon.ability}
+                        onChange={e => setPokemonState(p => ({ ...p, ability: e.target.value }))}
+                        className="input-field" placeholder="Ability name..." />
+                    }
+                  />
 
-              {/* IVs */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase mb-3">IVs</label>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                  {['hp', 'atk', 'def', 'spa', 'spd', 'spe'].map(stat => (
-                    <div key={stat}>
-                      <label className="block text-xs text-slate-500 mb-1 uppercase">{stat}</label>
-                      <input
-                        type="number"
-                        value={pokemon.ivs[stat]}
-                        onChange={e => setPokemonState(p => ({
-                          ...p,
-                          ivs: { ...p.ivs, [stat]: Math.max(0, Math.min(31, parseInt(e.target.value) || 0)) }
-                        }))}
-                        className="input-field text-sm font-mono"
-                        min="0"
-                        max="31"
-                      />
+                  {/* Item */}
+                  <BuildSection title="Item" items={popularItems} selected={pokemon.item}
+                    onSelect={name => setPokemonState(p => ({ ...p, item: name }))}
+                    color="amber" maxShow={12}
+                    fallback={
+                      <input type="text" value={pokemon.item}
+                        onChange={e => setPokemonState(p => ({ ...p, item: e.target.value }))}
+                        className="input-field" placeholder="Item name..." />
+                    }
+                  />
+
+                  {/* Tera Type (Gen 9+) */}
+                  {format.gen >= 9 && (
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-400 uppercase mb-2">Tera Type</label>
+                      <div className="space-y-0.5 max-h-48 overflow-y-auto">
+                        {popularTeraTypes.length > 0 ? (
+                          popularTeraTypes.map(tera => (
+                            <button key={tera.name}
+                              onClick={() => setPokemonState(p => ({ ...p, teraType: tera.name }))}
+                              className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors
+                                ${pokemon.teraType === tera.name
+                                  ? 'bg-pink-900/30 border border-pink-700/30 text-pink-300'
+                                  : 'hover:bg-slate-800 text-slate-300 hover:text-white'}`}
+                            >
+                              <TypeBadge type={tera.name} size="xs" />
+                              <span className="flex-1 text-left">{tera.name}</span>
+                              <UsageBar pct={tera.pct} color="pink" />
+                              <span className="text-xs font-mono text-slate-500 w-16 text-right">{tera.pct.toFixed(1)}%</span>
+                              {pokemon.teraType === tera.name && <span className="text-pink-400 text-xs">✓</span>}
+                            </button>
+                          ))
+                        ) : (
+                          <select value={pokemon.teraType}
+                            onChange={e => setPokemonState(p => ({ ...p, teraType: e.target.value }))}
+                            className="select-field"
+                          >
+                            <option value="">Select Tera Type...</option>
+                            {ALL_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                          </select>
+                        )}
+                      </div>
                     </div>
-                  ))}
+                  )}
+
+                  {/* EV Spread presets */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 uppercase mb-2">Popular EV Spreads</label>
+                    <div className="space-y-1 max-h-56 overflow-y-auto">
+                      {popularSpreads.slice(0, 10).map((s, i) => {
+                        const isActive = pokemon.nature === s.parsed?.nature &&
+                          JSON.stringify(pokemon.evs) === JSON.stringify(s.parsed?.evs);
+                        return (
+                          <button key={i} onClick={() => applySpread(s)}
+                            className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors
+                              ${isActive ? 'bg-blue-900/30 border border-blue-700/30' : 'hover:bg-slate-800'}`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="text-white font-medium">{s.parsed?.nature || 'Unknown'} Nature</span>
+                              <span className="text-xs font-mono text-slate-500">{s.pct.toFixed(1)}%</span>
+                            </div>
+                            {s.parsed?.evs && (
+                              <div className="flex flex-wrap gap-x-3 text-xs text-slate-400 font-mono mt-0.5">
+                                {Object.entries(s.parsed.evs).filter(([, v]) => v > 0).map(([stat, v]) => (
+                                  <span key={stat}>{v} {stat.toUpperCase()}</span>
+                                ))}
+                              </div>
+                            )}
+                          </button>
+                        );
+                      })}
+                      {popularSpreads.length === 0 && (
+                        <p className="text-xs text-slate-500 py-2">No spread data available.</p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Level & Shiny */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-400 mb-1">Level</label>
+                      <input type="number" value={pokemon.level}
+                        onChange={e => setPokemonState(p => ({ ...p, level: parseInt(e.target.value) || 100 }))}
+                        className="input-field" min="1" max="100" />
+                    </div>
+                    <div className="flex items-end gap-4">
+                      <label className="flex items-center gap-2 text-sm text-slate-400 cursor-pointer">
+                        <input type="checkbox" checked={pokemon.shiny}
+                          onChange={e => setPokemonState(p => ({ ...p, shiny: e.target.checked }))}
+                          className="rounded border-slate-600" />
+                        Shiny
+                      </label>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              )}
+            </div>
+          )}
+
+          {/* ========== EVs/IVs TAB ========== */}
+          {activeTab === 'evs' && (
+            <div>
+              {!pokemon.species ? (
+                <EmptyState text="Select a Pokémon first." />
+              ) : (
+                <div className="space-y-6">
+                  {/* Nature */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 uppercase mb-2">Nature</label>
+                    <select value={pokemon.nature}
+                      onChange={e => setPokemonState(p => ({ ...p, nature: e.target.value }))}
+                      className="select-field"
+                    >
+                      <option value="">Select nature...</option>
+                      {NATURES.map(n => (
+                        <option key={n.name} value={n.name}>
+                          {n.name}{n.plus ? ` (+${n.plus.toUpperCase()} / -${n.minus.toUpperCase()})` : ' (Neutral)'}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* EVs */}
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <label className="text-xs font-semibold text-slate-300 uppercase">EVs</label>
+                      <span className={`text-xs font-mono ${totalEVs > 510 ? 'text-red-400' : 'text-slate-400'}`}>
+                        {totalEVs}/510
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                      {['hp', 'atk', 'def', 'spa', 'spd', 'spe'].map(stat => (
+                        <div key={stat}>
+                          <label className="block text-xs text-slate-500 mb-1 uppercase">{stat}</label>
+                          <input type="number" value={pokemon.evs[stat]}
+                            onChange={e => updateEV(stat, e.target.value)}
+                            className="input-field text-sm font-mono" min="0" max="252" step="4" />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* IVs */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 uppercase mb-3">IVs</label>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                      {['hp', 'atk', 'def', 'spa', 'spd', 'spe'].map(stat => (
+                        <div key={stat}>
+                          <label className="block text-xs text-slate-500 mb-1 uppercase">{stat}</label>
+                          <input type="number" value={pokemon.ivs[stat]}
+                            onChange={e => setPokemonState(p => ({
+                              ...p,
+                              ivs: { ...p.ivs, [stat]: Math.max(0, Math.min(31, parseInt(e.target.value) || 0)) }
+                            }))}
+                            className="input-field text-sm font-mono" min="0" max="31" />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -601,6 +791,86 @@ function PokemonEditorModal({ slot, slotIndex, onSave, onClose }) {
   );
 }
 
+// ===================== Reusable Sub-Components =====================
+
+function PokemonPickerRow({ pokemon, rank, isSelected, onClick }) {
+  const [types, setTypes] = useState([]);
+
+  useEffect(() => {
+    getPokemonTypes(pokemon.name).then(setTypes).catch(() => {});
+  }, [pokemon.name]);
+
+  const spriteUrl = `https://play.pokemonshowdown.com/sprites/dex/${pokemon.name.toLowerCase().replace(/[^a-z0-9]/g, '')}.png`;
+
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors
+        ${isSelected
+          ? 'bg-blue-900/30 border border-blue-700/30'
+          : 'hover:bg-slate-800/60'}`}
+    >
+      <span className="text-xs text-slate-600 w-6 text-right font-mono">{rank}</span>
+      <img src={spriteUrl} alt={pokemon.name}
+        className="w-8 h-8 object-contain" loading="lazy"
+        onError={e => { e.target.style.opacity = '0.2'; }} />
+      <span className="text-white font-medium flex-1 text-left">{pokemon.name}</span>
+      <TypeBadgeRow types={types} size="xs" />
+      <span className="text-xs font-mono text-slate-500 w-16 text-right">
+        {(pokemon.usage * 100).toFixed(1)}%
+      </span>
+    </button>
+  );
+}
+
+function BuildSection({ title, items, selected, onSelect, color = 'blue', maxShow = 20, fallback }) {
+  const colorMap = {
+    blue: { active: 'bg-blue-900/30 border border-blue-700/30 text-blue-300', check: 'text-blue-400' },
+    violet: { active: 'bg-violet-900/30 border border-violet-700/30 text-violet-300', check: 'text-violet-400' },
+    amber: { active: 'bg-amber-900/30 border border-amber-700/30 text-amber-300', check: 'text-amber-400' },
+    pink: { active: 'bg-pink-900/30 border border-pink-700/30 text-pink-300', check: 'text-pink-400' },
+  };
+  const colors = colorMap[color] || colorMap.blue;
+
+  return (
+    <div>
+      <label className="block text-xs font-semibold text-slate-400 uppercase mb-2">{title}</label>
+      <div className="space-y-0.5 max-h-48 overflow-y-auto">
+        {items.length > 0 ? (
+          items.slice(0, maxShow).map(item => (
+            <button key={item.name} onClick={() => onSelect(item.name)}
+              className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors
+                ${selected === item.name ? colors.active : 'hover:bg-slate-800 text-slate-300 hover:text-white'}`}
+            >
+              <span className="flex-1 text-left">{item.name}</span>
+              <UsageBar pct={item.pct} color={color} />
+              <span className="text-xs font-mono text-slate-500 w-16 text-right">{item.pct.toFixed(1)}%</span>
+              {selected === item.name && <span className={`${colors.check} text-xs`}>✓</span>}
+            </button>
+          ))
+        ) : fallback}
+      </div>
+    </div>
+  );
+}
+
+function UsageBar({ pct, color = 'blue' }) {
+  const colorClass = {
+    blue: 'bg-blue-500', violet: 'bg-violet-500', amber: 'bg-amber-500', pink: 'bg-pink-500',
+  }[color] || 'bg-blue-500';
+
+  return (
+    <div className="w-16 h-1.5 bg-slate-800 rounded-full overflow-hidden flex-shrink-0">
+      <div className={`h-full rounded-full ${colorClass}`} style={{ width: `${Math.min(pct, 100)}%` }} />
+    </div>
+  );
+}
+
+function EmptyState({ text }) {
+  return <p className="text-sm text-slate-500 py-8 text-center">{text}</p>;
+}
+
+// ===================== Export Modal =====================
 function ExportModal({ team, onClose }) {
   const exportText = exportTeamToShowdown(team.pokemon);
   const [copied, setCopied] = useState(false);
@@ -625,14 +895,12 @@ function ExportModal({ team, onClose }) {
           </button>
         </div>
         <div className="p-4">
-          <textarea
-            readOnly
-            value={exportText}
+          <textarea readOnly value={exportText}
             className="input-field font-mono text-sm h-64 resize-none"
-            onClick={e => e.target.select()}
-          />
+            onClick={e => e.target.select()} />
           <div className="mt-3 flex justify-end">
-            <button onClick={copyToClipboard} className={`btn-primary text-sm ${copied ? '!bg-emerald-600' : ''}`}>
+            <button onClick={copyToClipboard}
+              className={`btn-primary text-sm ${copied ? '!bg-emerald-600' : ''}`}>
               {copied ? '✓ Copied!' : 'Copy to Clipboard'}
             </button>
           </div>
@@ -642,6 +910,7 @@ function ExportModal({ team, onClose }) {
   );
 }
 
+// ===================== Import Modal =====================
 function ImportModal({ onImport, onClose }) {
   const [text, setText] = useState('');
   const [error, setError] = useState('');
@@ -653,10 +922,7 @@ function ImportModal({ onImport, onClose }) {
         setError('No valid Pokémon found. Please paste a Showdown team format.');
         return;
       }
-      // Pad to 6 slots
-      while (pokemon.length < 6) {
-        pokemon.push(createEmptyPokemon());
-      }
+      while (pokemon.length < 6) pokemon.push(createEmptyPokemon());
       onImport(pokemon.slice(0, 6));
     } catch (e) {
       setError('Failed to parse team. Please check the format.');
@@ -676,12 +942,9 @@ function ImportModal({ onImport, onClose }) {
           </button>
         </div>
         <div className="p-4">
-          <textarea
-            value={text}
-            onChange={e => { setText(e.target.value); setError(''); }}
+          <textarea value={text} onChange={e => { setText(e.target.value); setError(''); }}
             className="input-field font-mono text-sm h-64 resize-none"
-            placeholder="Paste your Showdown team here..."
-          />
+            placeholder="Paste your Showdown team here..." />
           {error && <p className="text-red-400 text-sm mt-2">{error}</p>}
           <div className="mt-3 flex justify-end gap-2">
             <button onClick={onClose} className="btn-ghost text-sm">Cancel</button>
@@ -693,19 +956,18 @@ function ImportModal({ onImport, onClose }) {
   );
 }
 
+// ===================== Type Analysis Panel =====================
 function TypeAnalysisPanel({ teamMembers }) {
   const matrix = generateTypeMatrix(teamMembers);
   const weaknesses = getTeamWeaknesses(teamMembers);
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Weakness Overview */}
       <div className="glass-panel p-5">
-        <h3 className="font-semibold text-white mb-4 text-sm">🛡️ Team Weakness Overview</h3>
+        <h3 className="font-semibold text-white mb-4 text-sm">Team Weakness Overview</h3>
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
           {weaknesses.map(({ type, weakCount, resistCount, score }) => (
-            <div
-              key={type}
+            <div key={type}
               className={`rounded-lg p-2 text-center text-xs ${
                 score > 1 ? 'bg-red-900/40 border border-red-700/30' :
                 score > 0 ? 'bg-amber-900/30 border border-amber-700/20' :
@@ -729,9 +991,8 @@ function TypeAnalysisPanel({ teamMembers }) {
         </p>
       </div>
 
-      {/* Type Matrix */}
       <div className="glass-panel p-5 overflow-x-auto">
-        <h3 className="font-semibold text-white mb-4 text-sm">📊 Defensive Type Chart</h3>
+        <h3 className="font-semibold text-white mb-4 text-sm">Defensive Type Chart</h3>
         <table className="w-full text-xs">
           <thead>
             <tr>
@@ -746,9 +1007,7 @@ function TypeAnalysisPanel({ teamMembers }) {
           <tbody>
             {matrix.map(row => (
               <tr key={row.attackType}>
-                <td className="p-1">
-                  <TypeBadge type={row.attackType} size="xs" />
-                </td>
+                <td className="p-1"><TypeBadge type={row.attackType} size="xs" /></td>
                 {row.matchups.map((m, i) => (
                   <td key={i} className="p-1 text-center">
                     <span className={`inline-block w-8 py-0.5 rounded text-[10px] font-bold ${getEffectivenessClass(m.multiplier)}`}>

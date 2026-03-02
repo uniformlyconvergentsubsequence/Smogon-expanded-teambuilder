@@ -374,12 +374,12 @@ function LeadsTab({ leadsData, pokemonTypes, format, formatId }) {
                       />
                     </div>
                     <span className="text-sm font-mono text-slate-300 w-16 text-right">
-                      {pokemon.usage.toFixed(2)}%
+                      {(pokemon.usage * 100).toFixed(2)}%
                     </span>
                   </div>
                 </td>
                 <td className="px-4 py-2.5 text-right text-sm text-slate-400 font-mono hidden md:table-cell">
-                  {pokemon.raw?.toLocaleString() || '—'}
+                  {(pokemon.rawCount || pokemon.raw || 0).toLocaleString()}
                 </td>
               </tr>
             ))}

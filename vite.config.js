@@ -19,5 +19,12 @@ export default defineConfig({
   server: {
     port: 3000,
     open: true,
+    proxy: {
+      '/smogon-stats': {
+        target: 'https://www.smogon.com/stats',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/smogon-stats/, ''),
+      },
+    },
   },
 });
