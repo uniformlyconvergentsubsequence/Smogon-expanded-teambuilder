@@ -47,71 +47,110 @@ export async function fetchMoves() {
  * Parse a Showdown .js data file that exports a variable like:
  * exports.BattleItems = { ... };
  *
- * Uses a line-by-line parser (no eval / new Function) so it works
- * under strict CSP and in every deployment environment.
+ * Handles both minified (single-line) and formatted (tab-indented)
+ * Showdown data files. No eval / new Function — safe under strict CSP.
  */
 function parseShowdownJS(text) {
   const result = {};
-  const lines = text.split('\n');
-  let currentKey = null;
-  let currentEntry = {};
-  let braceDepth = 0;
-  let inEntry = false;
 
-  for (const line of lines) {
-    // Detect a top-level entry start: single-tab indented key followed by {
-    if (!inEntry) {
-      const entryStart = line.match(/^\t(\w+):\s*\{/);
-      if (entryStart) {
-        currentKey = entryStart[1];
-        currentEntry = {};
-        braceDepth = 1;
-        inEntry = true;
+  // Strip the outer assignment: "exports.BattleFoo = { ... };" → inner content
+  const assignMatch = text.match(/=\s*\{([\s\S]*)\}\s*;?\s*$/);
+  if (!assignMatch) return result;
+  const inner = assignMatch[1];
+
+  // Walk through the inner content, finding top-level entries: id:{...}
+  // We need to handle brace counting for nested objects
+  let i = 0;
+  const len = inner.length;
+
+  while (i < len) {
+    // Skip whitespace and commas
+    while (i < len && /[\s,]/.test(inner[i])) i++;
+    if (i >= len) break;
+
+    // Read the entry key (may be quoted or unquoted)
+    let key = '';
+    if (inner[i] === '"') {
+      i++; // skip opening quote
+      while (i < len && inner[i] !== '"') {
+        key += inner[i++];
       }
-      continue;
+      i++; // skip closing quote
+    } else {
+      while (i < len && /[\w$]/.test(inner[i])) {
+        key += inner[i++];
+      }
     }
 
-    // Inside an entry — count braces to know when it ends
-    for (const ch of line) {
-      if (ch === '{') braceDepth++;
-      else if (ch === '}') braceDepth--;
+    if (!key) { i++; continue; }
+
+    // Skip to the colon
+    while (i < len && inner[i] !== ':') i++;
+    i++; // skip colon
+
+    // Skip whitespace
+    while (i < len && /\s/.test(inner[i])) i++;
+
+    if (inner[i] !== '{') { i++; continue; }
+
+    // Find the matching closing brace for this entry
+    const entryStart = i;
+    let depth = 0;
+    let inStr = false;
+    let escape = false;
+
+    while (i < len) {
+      const ch = inner[i];
+      if (escape) { escape = false; i++; continue; }
+      if (ch === '\\' && inStr) { escape = true; i++; continue; }
+      if (ch === '"') { inStr = !inStr; i++; continue; }
+      if (!inStr) {
+        if (ch === '{') depth++;
+        else if (ch === '}') {
+          depth--;
+          if (depth === 0) { i++; break; }
+        }
+      }
+      i++;
     }
 
-    // Extract string properties at the second tab level
-    const strProp = line.match(/^\t\t(\w+):\s*"([^"]*)"/);
-    if (strProp) {
-      currentEntry[strProp[1]] = strProp[2];
-    }
+    const entryText = inner.slice(entryStart, i);
 
-    // Extract number properties at the second tab level
-    const numProp = line.match(/^\t\t(\w+):\s*(-?\d+)/);
-    if (numProp && !strProp) {
-      currentEntry[numProp[1]] = Number(numProp[2]);
-    }
+    // Extract properties we care about from entryText
+    const entry = {};
 
-    // Extract boolean/null at the second tab level
-    const boolProp = line.match(/^\t\t(\w+):\s*(true|false|null)\b/);
-    if (boolProp) {
-      currentEntry[boolProp[1]] = boolProp[2] === 'true' ? true : boolProp[2] === 'false' ? false : null;
-    }
+    // name:"..." — the main thing we need
+    const nameMatch = entryText.match(/\bname:\s*"([^"]*)"/);
+    if (nameMatch) entry.name = nameMatch[1];
 
-    // Extract simple string arrays (e.g., types: ["Fire", "Flying"])
-    const arrProp = line.match(/^\t\t(\w+):\s*\[([^\]]*)\]/);
-    if (arrProp) {
-      currentEntry[arrProp[1]] = arrProp[2]
+    // num:123
+    const numMatch = entryText.match(/\bnum:\s*(-?\d+)/);
+    if (numMatch) entry.num = Number(numMatch[1]);
+
+    // types:["Fire","Water"]
+    const typesMatch = entryText.match(/\btypes:\s*\[([^\]]*)\]/);
+    if (typesMatch) {
+      entry.types = typesMatch[1]
         .split(',')
         .map(s => s.trim().replace(/^"|"$/g, ''))
         .filter(Boolean);
     }
 
-    if (braceDepth === 0) {
-      // Entry complete
-      if (currentKey) {
-        result[currentKey] = currentEntry;
+    // isNonstandard:"Past"
+    const nonstdMatch = entryText.match(/\bisNonstandard:\s*"([^"]*)"/);
+    if (nonstdMatch) entry.isNonstandard = nonstdMatch[1];
+
+    // baseStats:{hp:X,atk:X,...}
+    const statsMatch = entryText.match(/\bbaseStats:\s*\{([^}]*)\}/);
+    if (statsMatch) {
+      entry.baseStats = {};
+      const statPairs = statsMatch[1].matchAll(/(\w+):\s*(\d+)/g);
+      for (const m of statPairs) {
+        entry.baseStats[m[1]] = Number(m[2]);
       }
-      inEntry = false;
-      currentKey = null;
     }
+
+    result[key] = entry;
   }
 
   return result;
