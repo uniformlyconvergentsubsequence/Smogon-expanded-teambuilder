@@ -414,7 +414,10 @@ function PokemonEditorModal({ slot, slotIndex, chaosData, format, formatId, onSa
   const popularTeammates = useMemo(() => {
     if (!pokemonChaos?.Teammates) return [];
     const entries = sortByValue(pokemonChaos.Teammates);
-    const denom = entries.reduce((s, [, v]) => s + v, 0) || 1;
+    // Use Raw count as denominator — each value is how many times that teammate
+    // appeared alongside this Pokemon, so dividing by raw count gives the true
+    // "% of this Pokemon's teams that also had teammate X".
+    const denom = pokemonChaos['Raw count'] || entries.reduce((s, [, v]) => s + v, 0) || 1;
     return entries.map(([name, val]) => ({
       name, pct: (val / denom) * 100,
     }));
