@@ -3,7 +3,7 @@ import { useTeam } from '../context/TeamContext';
 import { useApp } from '../context/AppContext';
 import { exportTeamToShowdown, importTeamFromShowdown, createEmptyPokemon, createEmptyTeam } from '../utils/exportShowdown';
 import { fetchChaosData, getPokemonFromChaos, getUsageListFromChaos, fetchMonotypeChaosData } from '../services/smogonApi';
-import { getPokemonTypes, formatMoveName, formatItemName, formatAbilityName, formatTypeName } from '../services/showdownData';
+import { getPokemonTypes, formatMoveName, formatItemName, formatAbilityName, formatTypeName, fetchMoves } from '../services/showdownData';
 import { TypeBadgeRow } from '../components/TypeBadge';
 import TypeBadge from '../components/TypeBadge';
 import FormatSelector from '../components/FormatSelector';
@@ -362,6 +362,36 @@ function PokemonEditorModal({ slot, slotIndex, chaosData, format, formatId, onSa
       setPokemonChaos(null);
     }
   }, [pokemon.species, chaosData]);
+
+  // Auto-set 0 Atk IVs when using a -Atk nature and no physical moves
+  // (reduces Foul Play / confusion damage)
+  const MINUS_ATK_NATURES = ['Bold', 'Calm', 'Modest', 'Timid'];
+  useEffect(() => {
+    if (!pokemon.species || !pokemon.nature) return;
+    const isMinusAtk = MINUS_ATK_NATURES.includes(pokemon.nature);
+    const filledMoves = pokemon.moves.filter(m => m);
+    if (filledMoves.length === 0) return; // don't change until moves are set
+
+    fetchMoves().then(allMoves => {
+      const hasPhysical = filledMoves.some(moveName => {
+        const id = moveName.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const move = allMoves[id];
+        return move && move.category === 'Physical';
+      });
+
+      setPokemonState(prev => {
+        const shouldBeZero = isMinusAtk && !hasPhysical;
+        const currentAtk = prev.ivs?.atk ?? 31;
+        // Only update if the value actually needs to change
+        if (shouldBeZero && currentAtk !== 0) {
+          return { ...prev, ivs: { ...prev.ivs, atk: 0 } };
+        } else if (!shouldBeZero && currentAtk === 0) {
+          return { ...prev, ivs: { ...prev.ivs, atk: 31 } };
+        }
+        return prev;
+      });
+    });
+  }, [pokemon.nature, pokemon.moves, pokemon.species]);
 
   // Compute sorted stats lists — use sum of values as denominator (handles weighted data correctly)
   const popularMoves = useMemo(() => {
