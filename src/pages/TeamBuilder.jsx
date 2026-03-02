@@ -7,7 +7,7 @@ import { getPokemonTypes, formatMoveName, formatItemName, formatAbilityName, for
 import { TypeBadgeRow } from '../components/TypeBadge';
 import TypeBadge from '../components/TypeBadge';
 import FormatSelector from '../components/FormatSelector';
-import { NATURES, ALL_TYPES, isMonotypeFormat, hasMonotypeTypeData, getMonotypeFormatId, getSmogonDexUrl, TIERS } from '../data/formats';
+import { ALL_TYPES, isMonotypeFormat, hasMonotypeTypeData, getMonotypeFormatId, getSmogonDexUrl, TIERS } from '../data/formats';
 import { generateTypeMatrix, calculateSynergyScore, getTeamWeaknesses } from '../utils/typeAnalysis';
 import { getEffectivenessClass, getEffectivenessLabel, sortByValue, parseSpread } from '../utils/helpers';
 
@@ -456,14 +456,6 @@ function PokemonEditorModal({ slot, slotIndex, chaosData, format, formatId, onSa
     }));
   }
 
-  function updateEV(stat, value) {
-    const val = Math.max(0, Math.min(252, parseInt(value) || 0));
-    setPokemonState(prev => ({
-      ...prev,
-      evs: { ...prev.evs, [stat]: val }
-    }));
-  }
-
   function applySpread(spreadData) {
     if (!spreadData?.parsed) return;
     setPokemonState(prev => ({
@@ -473,13 +465,13 @@ function PokemonEditorModal({ slot, slotIndex, chaosData, format, formatId, onSa
     }));
   }
 
-  const totalEVs = Object.values(pokemon.evs).reduce((a, b) => a + b, 0);
-
   const EDIT_TABS = [
     { id: 'pokemon', label: '🔍 Pokémon' },
     { id: 'moves', label: '⚔️ Moves' },
-    { id: 'build', label: '🛠️ Build' },
-    { id: 'evs', label: '📊 EVs/IVs' },
+    { id: 'ability', label: '🧬 Ability' },
+    { id: 'item', label: '🎒 Item' },
+    ...(format.gen >= 9 ? [{ id: 'tera', label: '💎 Tera' }] : []),
+    { id: 'spreads', label: '📊 Spreads' },
     { id: 'strategy', label: '📖 Strategy' },
   ];
 
@@ -528,12 +520,12 @@ function PokemonEditorModal({ slot, slotIndex, chaosData, format, formatId, onSa
 
         {/* Tabs */}
         <div className="sticky top-[73px] bg-slate-900/95 z-10 px-4 py-2 border-b border-slate-800">
-          <div className="flex gap-1 bg-slate-800/50 p-1 rounded-lg">
+          <div className="flex gap-1 bg-slate-800/50 p-1 rounded-lg overflow-x-auto">
             {EDIT_TABS.map(tab => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex-1 px-3 py-1.5 text-sm font-medium rounded-md transition-all
+                className={`whitespace-nowrap px-2.5 py-1.5 text-xs font-medium rounded-md transition-all
                   ${activeTab === tab.id ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white'}`}
               >
                 {tab.label}
@@ -670,87 +662,117 @@ function PokemonEditorModal({ slot, slotIndex, chaosData, format, formatId, onSa
             </div>
           )}
 
-          {/* ========== BUILD TAB ========== */}
-          {activeTab === 'build' && (
+          {/* ========== ABILITY TAB ========== */}
+          {activeTab === 'ability' && (
             <div>
               {!pokemon.species ? (
                 <EmptyState text="Select a Pokémon first." />
               ) : (
-                <div className="space-y-5">
-                  {/* Ability */}
+                <div>
+                  <p className="text-xs text-slate-500 mb-3">Select an ability for {pokemon.species}. Sorted by popularity.</p>
                   <BuildSection title="Ability" items={popularAbilities} selected={pokemon.ability}
                     onSelect={name => setPokemonState(p => ({ ...p, ability: name }))}
-                    color="violet"
+                    color="violet" maxShow={20}
                     fallback={
                       <input type="text" value={pokemon.ability}
                         onChange={e => setPokemonState(p => ({ ...p, ability: e.target.value }))}
                         className="input-field" placeholder="Ability name..." />
                     }
                   />
+                </div>
+              )}
+            </div>
+          )}
 
-                  {/* Item */}
+          {/* ========== ITEM TAB ========== */}
+          {activeTab === 'item' && (
+            <div>
+              {!pokemon.species ? (
+                <EmptyState text="Select a Pokémon first." />
+              ) : (
+                <div>
+                  <p className="text-xs text-slate-500 mb-3">Select an item for {pokemon.species}. Sorted by popularity.</p>
                   <BuildSection title="Item" items={popularItems} selected={pokemon.item}
                     onSelect={name => setPokemonState(p => ({ ...p, item: name }))}
-                    color="amber" maxShow={12}
+                    color="amber" maxShow={20}
                     fallback={
                       <input type="text" value={pokemon.item}
                         onChange={e => setPokemonState(p => ({ ...p, item: e.target.value }))}
                         className="input-field" placeholder="Item name..." />
                     }
                   />
+                </div>
+              )}
+            </div>
+          )}
 
-                  {/* Tera Type (Gen 9+) */}
-                  {format.gen >= 9 && (
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-400 uppercase mb-2">Tera Type</label>
-                      <div className="space-y-0.5 max-h-48 overflow-y-auto">
-                        {popularTeraTypes.length > 0 ? (
-                          popularTeraTypes.map(tera => (
-                            <button key={tera.name}
-                              onClick={() => setPokemonState(p => ({ ...p, teraType: tera.name }))}
-                              className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors
-                                ${pokemon.teraType === tera.name
-                                  ? 'bg-pink-900/30 border border-pink-700/30 text-pink-300'
-                                  : 'hover:bg-slate-800 text-slate-300 hover:text-white'}`}
-                            >
-                              <TypeBadge type={tera.name} size="xs" />
-                              <span className="flex-1 text-left">{tera.name}</span>
-                              <UsageBar pct={tera.pct} color="pink" />
-                              <span className="text-xs font-mono text-slate-500 w-16 text-right">{tera.pct.toFixed(1)}%</span>
-                              {pokemon.teraType === tera.name && <span className="text-pink-400 text-xs">✓</span>}
-                            </button>
-                          ))
-                        ) : (
-                          <select value={pokemon.teraType}
-                            onChange={e => setPokemonState(p => ({ ...p, teraType: e.target.value }))}
-                            className="select-field"
-                          >
-                            <option value="">Select Tera Type...</option>
-                            {ALL_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-                          </select>
-                        )}
-                      </div>
-                    </div>
-                  )}
+          {/* ========== TERA TYPE TAB ========== */}
+          {activeTab === 'tera' && format.gen >= 9 && (
+            <div>
+              {!pokemon.species ? (
+                <EmptyState text="Select a Pokémon first." />
+              ) : (
+                <div>
+                  <p className="text-xs text-slate-500 mb-3">Select a Tera Type for {pokemon.species}. Sorted by popularity.</p>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase mb-2">Tera Type</label>
+                  <div className="space-y-0.5 max-h-[60vh] overflow-y-auto">
+                    {popularTeraTypes.length > 0 ? (
+                      popularTeraTypes.map(tera => (
+                        <button key={tera.name}
+                          onClick={() => setPokemonState(p => ({ ...p, teraType: tera.name }))}
+                          className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors
+                            ${pokemon.teraType === tera.name
+                              ? 'bg-pink-900/30 border border-pink-700/30 text-pink-300'
+                              : 'hover:bg-slate-800 text-slate-300 hover:text-white'}`}
+                        >
+                          <TypeBadge type={tera.name} size="xs" />
+                          <span className="flex-1 text-left">{tera.name}</span>
+                          <UsageBar pct={tera.pct} color="pink" />
+                          <span className="text-xs font-mono text-slate-500 w-16 text-right">{tera.pct.toFixed(1)}%</span>
+                          {pokemon.teraType === tera.name && <span className="text-pink-400 text-xs">✓</span>}
+                        </button>
+                      ))
+                    ) : (
+                      <select value={pokemon.teraType}
+                        onChange={e => setPokemonState(p => ({ ...p, teraType: e.target.value }))}
+                        className="select-field"
+                      >
+                        <option value="">Select Tera Type...</option>
+                        {ALL_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
-                  {/* EV Spread presets */}
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-400 uppercase mb-2">Popular EV Spreads</label>
-                    <div className="space-y-1 max-h-56 overflow-y-auto">
-                      {popularSpreads.slice(0, 10).map((s, i) => {
+          {/* ========== SPREADS TAB ========== */}
+          {activeTab === 'spreads' && (
+            <div>
+              {!pokemon.species ? (
+                <EmptyState text="Select a Pokémon first." />
+              ) : (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase mb-3">Popular EV Spreads</label>
+                  <div className="space-y-1">
+                    {popularSpreads.length > 0 ? (
+                      popularSpreads.slice(0, 15).map((s, i) => {
                         const isActive = pokemon.nature === s.parsed?.nature &&
                           JSON.stringify(pokemon.evs) === JSON.stringify(s.parsed?.evs);
                         return (
                           <button key={i} onClick={() => applySpread(s)}
-                            className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors
-                              ${isActive ? 'bg-blue-900/30 border border-blue-700/30' : 'hover:bg-slate-800'}`}
+                            className={`w-full text-left px-4 py-3 rounded-lg text-sm transition-colors
+                              ${isActive
+                                ? 'bg-blue-900/30 border border-blue-700/30'
+                                : i === 0 ? 'bg-slate-800/80 hover:bg-slate-700/80' : 'hover:bg-slate-800/60'}`}
                           >
                             <div className="flex items-center justify-between">
-                              <span className="text-white font-medium">{s.parsed?.nature || 'Unknown'} Nature</span>
-                              <span className="text-xs font-mono text-slate-500">{s.pct.toFixed(1)}%</span>
+                              <span className="text-white font-semibold">{s.parsed?.nature || 'Unknown'} Nature</span>
+                              <span className="text-sm text-slate-400">{s.pct.toFixed(1)}%</span>
                             </div>
                             {s.parsed?.evs && (
-                              <div className="flex flex-wrap gap-x-3 text-xs text-slate-400 font-mono mt-0.5">
+                              <div className="flex flex-wrap gap-x-4 text-xs text-slate-400 font-mono mt-1">
                                 {Object.entries(s.parsed.evs).filter(([, v]) => v > 0).map(([stat, v]) => (
                                   <span key={stat}>{v} {stat.toUpperCase()}</span>
                                 ))}
@@ -758,94 +780,10 @@ function PokemonEditorModal({ slot, slotIndex, chaosData, format, formatId, onSa
                             )}
                           </button>
                         );
-                      })}
-                      {popularSpreads.length === 0 && (
-                        <p className="text-xs text-slate-500 py-2">No spread data available.</p>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Level & Shiny */}
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Level</label>
-                      <input type="number" value={pokemon.level}
-                        onChange={e => setPokemonState(p => ({ ...p, level: parseInt(e.target.value) || 100 }))}
-                        className="input-field" min="1" max="100" />
-                    </div>
-                    <div className="flex items-end gap-4">
-                      <label className="flex items-center gap-2 text-sm text-slate-400 cursor-pointer">
-                        <input type="checkbox" checked={pokemon.shiny}
-                          onChange={e => setPokemonState(p => ({ ...p, shiny: e.target.checked }))}
-                          className="rounded border-slate-600" />
-                        Shiny
-                      </label>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* ========== EVs/IVs TAB ========== */}
-          {activeTab === 'evs' && (
-            <div>
-              {!pokemon.species ? (
-                <EmptyState text="Select a Pokémon first." />
-              ) : (
-                <div className="space-y-6">
-                  {/* Nature */}
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-400 uppercase mb-2">Nature</label>
-                    <select value={pokemon.nature}
-                      onChange={e => setPokemonState(p => ({ ...p, nature: e.target.value }))}
-                      className="select-field"
-                    >
-                      <option value="">Select nature...</option>
-                      {NATURES.map(n => (
-                        <option key={n.name} value={n.name}>
-                          {n.name}{n.plus ? ` (+${n.plus.toUpperCase()} / -${n.minus.toUpperCase()})` : ' (Neutral)'}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* EVs */}
-                  <div>
-                    <div className="flex items-center justify-between mb-3">
-                      <label className="text-xs font-semibold text-slate-300 uppercase">EVs</label>
-                      <span className={`text-xs font-mono ${totalEVs > 510 ? 'text-red-400' : 'text-slate-400'}`}>
-                        {totalEVs}/510
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                      {['hp', 'atk', 'def', 'spa', 'spd', 'spe'].map(stat => (
-                        <div key={stat}>
-                          <label className="block text-xs text-slate-500 mb-1 uppercase">{stat}</label>
-                          <input type="number" value={pokemon.evs[stat]}
-                            onChange={e => updateEV(stat, e.target.value)}
-                            className="input-field text-sm font-mono" min="0" max="252" step="4" />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* IVs */}
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-300 uppercase mb-3">IVs</label>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                      {['hp', 'atk', 'def', 'spa', 'spd', 'spe'].map(stat => (
-                        <div key={stat}>
-                          <label className="block text-xs text-slate-500 mb-1 uppercase">{stat}</label>
-                          <input type="number" value={pokemon.ivs[stat]}
-                            onChange={e => setPokemonState(p => ({
-                              ...p,
-                              ivs: { ...p.ivs, [stat]: Math.max(0, Math.min(31, parseInt(e.target.value) || 0)) }
-                            }))}
-                            className="input-field text-sm font-mono" min="0" max="31" />
-                        </div>
-                      ))}
-                    </div>
+                      })
+                    ) : (
+                      <EmptyState text="No spread data available for this Pokémon in this format." />
+                    )}
                   </div>
                 </div>
               )}
