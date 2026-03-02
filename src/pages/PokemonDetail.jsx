@@ -247,54 +247,59 @@ export default function PokemonDetail() {
           <div className="grid lg:grid-cols-2 gap-6">
             {/* Moves */}
             {(activeSection === 'overview' || activeSection === 'moves') && pokemonInfo.Moves && (
-              <DataSection title="🎯 Moves" data={pokemonInfo.Moves} rawCount={pokemonInfo['Raw count']} color="blue" nameFormatter={formatMoveName} />
+              <DataSection title="🎯 Moves" data={pokemonInfo.Moves} color="blue" nameFormatter={formatMoveName} slots={4} />
             )}
 
             {/* Abilities */}
             {(activeSection === 'overview' || activeSection === 'items') && pokemonInfo.Abilities && (
-              <DataSection title="⚡ Abilities" data={pokemonInfo.Abilities} rawCount={pokemonInfo['Raw count']} color="violet" nameFormatter={formatAbilityName} />
+              <DataSection title="⚡ Abilities" data={pokemonInfo.Abilities} color="violet" nameFormatter={formatAbilityName} />
             )}
 
             {/* Items */}
             {(activeSection === 'overview' || activeSection === 'items') && pokemonInfo.Items && (
-              <DataSection title="🎒 Items" data={pokemonInfo.Items} rawCount={pokemonInfo['Raw count']} color="amber" nameFormatter={formatItemName} />
+              <DataSection title="🎒 Items" data={pokemonInfo.Items} color="amber" nameFormatter={formatItemName} />
             )}
 
             {/* Tera Types */}
-            {(activeSection === 'overview' || activeSection === 'items') && pokemonInfo['Tera Types'] && (
-              <div className="glass-panel p-5">
-                <h3 className="font-semibold text-white mb-4 text-sm">✨ Tera Types</h3>
-                <div className="space-y-2">
-                  {sortByValue(pokemonInfo['Tera Types']).slice(0, 10).map(([name, value]) => {
-                    const pct = pokemonInfo['Raw count'] ? (value / pokemonInfo['Raw count']) * 100 : 0;
-                    const maxPct = sortByValue(pokemonInfo['Tera Types'])[0]?.[1]
-                      ? (sortByValue(pokemonInfo['Tera Types'])[0][1] / (pokemonInfo['Raw count'] || 1)) * 100
-                      : 100;
-                    const displayName = formatTypeName(name);
-                    return (
-                      <div key={name} className="flex items-center gap-3">
-                        <TypeBadge type={displayName} size="xs" className="w-20" />
-                        <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                          <div className="h-full bg-pink-500 rounded-full" style={{ width: `${maxPct > 0 ? (pct / maxPct) * 100 : 0}%` }} />
+            {(activeSection === 'overview' || activeSection === 'items') && pokemonInfo['Tera Types'] && (() => {
+              const teraEntries = sortByValue(pokemonInfo['Tera Types']);
+              const teraSum = teraEntries.reduce((s, [, v]) => s + v, 0) || 1;
+              return (
+                <div className="glass-panel p-5">
+                  <h3 className="font-semibold text-white mb-4 text-sm">✨ Tera Types</h3>
+                  <div className="space-y-2">
+                    {teraEntries.slice(0, 10).map(([name, value]) => {
+                      const pct = (value / teraSum) * 100;
+                      const maxPct = (teraEntries[0][1] / teraSum) * 100;
+                      const displayName = formatTypeName(name);
+                      return (
+                        <div key={name} className="flex items-center gap-3">
+                          <TypeBadge type={displayName} size="xs" className="w-20" />
+                          <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                            <div className="h-full bg-pink-500 rounded-full" style={{ width: `${maxPct > 0 ? (pct / maxPct) * 100 : 0}%` }} />
+                          </div>
+                          <span className="text-xs font-mono text-slate-300 w-14 text-right">
+                            {pct.toFixed(1)}%
+                          </span>
                         </div>
-                        <span className="text-xs font-mono text-slate-300 w-14 text-right">
-                          {pct.toFixed(1)}%
-                        </span>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* Spreads */}
-            {(activeSection === 'overview' || activeSection === 'spreads') && pokemonInfo.Spreads && (
+            {(activeSection === 'overview' || activeSection === 'spreads') && pokemonInfo.Spreads && (() => {
+              const spreadEntries = sortByValue(pokemonInfo.Spreads);
+              const spreadSum = spreadEntries.reduce((s, [, v]) => s + v, 0) || 1;
+              return (
               <div className="glass-panel p-5">
                 <h3 className="font-semibold text-white mb-4 text-sm">📊 EV Spreads</h3>
                 <div className="space-y-2.5">
-                  {sortByValue(pokemonInfo.Spreads).slice(0, 8).map(([spread, value]) => {
+                  {spreadEntries.slice(0, 8).map(([spread, value]) => {
                     const parsed = parseSpread(spread);
-                    const pct = pokemonInfo['Raw count'] ? (value / pokemonInfo['Raw count']) * 100 : 0;
+                    const pct = (value / spreadSum) * 100;
                     return (
                       <div key={spread} className="bg-slate-800/40 rounded-lg p-3">
                         <div className="flex items-center justify-between mb-1">
@@ -315,16 +320,20 @@ export default function PokemonDetail() {
                   })}
                 </div>
               </div>
-            )}
+              );
+            })()}
 
             {/* Teammates */}
-            {(activeSection === 'overview' || activeSection === 'teammates') && pokemonInfo.Teammates && (
+            {(activeSection === 'overview' || activeSection === 'teammates') && pokemonInfo.Teammates && (() => {
+              const tmEntries = sortByValue(pokemonInfo.Teammates);
+              const tmSum = tmEntries.reduce((s, [, v]) => s + Math.abs(v), 0) || 1;
+              return (
               <div className="glass-panel p-5">
                 <h3 className="font-semibold text-white mb-4 text-sm">🤝 Common Teammates</h3>
                 <div className="space-y-2">
-                  {sortByValue(pokemonInfo.Teammates).slice(0, 12).map(([name, value]) => {
-                    // Teammate values are differential weighted counts, normalize to percentage
-                    const pct = pokemonInfo['Raw count'] ? (value / pokemonInfo['Raw count']) * 100 : value * 100;
+                  {tmEntries.slice(0, 12).map(([name, value]) => {
+                    // Teammate values are differential: positive = used together more often
+                    const pct = (value / tmSum) * 100;
                     return (
                       <Link
                         key={name}
@@ -347,7 +356,8 @@ export default function PokemonDetail() {
                   })}
                 </div>
               </div>
-            )}
+              );
+            })()}
 
             {/* Checks & Counters */}
             {(activeSection === 'overview' || activeSection === 'counters') && pokemonInfo['Checks and Counters'] && (
@@ -390,11 +400,13 @@ export default function PokemonDetail() {
   );
 }
 
-function DataSection({ title, data, rawCount, color = 'blue', maxItems = 15, nameFormatter }) {
+function DataSection({ title, data, color = 'blue', maxItems = 15, nameFormatter, slots = 1 }) {
   const sorted = sortByValue(data);
-  // Normalize values: divide by rawCount to get percentages
+  // Compute denominator from sum of values (works with both raw and weighted data)
+  const totalSum = sorted.reduce((sum, [, val]) => sum + val, 0);
+  const denominator = (totalSum / slots) || 1;
   const normalized = sorted.map(([name, value]) => {
-    const pct = rawCount ? (value / rawCount) * 100 : value;
+    const pct = (value / denominator) * 100;
     const displayName = nameFormatter ? nameFormatter(name) : name;
     return [displayName, pct];
   });

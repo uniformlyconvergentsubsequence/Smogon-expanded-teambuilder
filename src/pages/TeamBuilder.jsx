@@ -358,45 +358,53 @@ function PokemonEditorModal({ slot, slotIndex, chaosData, format, formatId, onSa
     }
   }, [pokemon.species, chaosData]);
 
-  // Compute sorted stats lists
-  const rawCount = pokemonChaos?.['Raw count'] || 1;
-
+  // Compute sorted stats lists — use sum of values as denominator (handles weighted data correctly)
   const popularMoves = useMemo(() => {
     if (!pokemonChaos?.Moves) return [];
-    return sortByValue(pokemonChaos.Moves).map(([name, val]) => ({
-      name: formatMoveName(name), pct: (val / rawCount) * 100,
+    const entries = sortByValue(pokemonChaos.Moves);
+    const denom = (entries.reduce((s, [, v]) => s + v, 0) / 4) || 1; // 4 move slots
+    return entries.map(([name, val]) => ({
+      name: formatMoveName(name), pct: (val / denom) * 100,
     }));
-  }, [pokemonChaos, rawCount]);
+  }, [pokemonChaos]);
 
   const popularAbilities = useMemo(() => {
     if (!pokemonChaos?.Abilities) return [];
-    return sortByValue(pokemonChaos.Abilities).map(([name, val]) => ({
-      name: formatAbilityName(name), pct: (val / rawCount) * 100,
+    const entries = sortByValue(pokemonChaos.Abilities);
+    const denom = entries.reduce((s, [, v]) => s + v, 0) || 1;
+    return entries.map(([name, val]) => ({
+      name: formatAbilityName(name), pct: (val / denom) * 100,
     }));
-  }, [pokemonChaos, rawCount]);
+  }, [pokemonChaos]);
 
   const popularItems = useMemo(() => {
     if (!pokemonChaos?.Items) return [];
-    return sortByValue(pokemonChaos.Items).map(([name, val]) => ({
-      name: formatItemName(name), pct: (val / rawCount) * 100,
+    const entries = sortByValue(pokemonChaos.Items);
+    const denom = entries.reduce((s, [, v]) => s + v, 0) || 1;
+    return entries.map(([name, val]) => ({
+      name: formatItemName(name), pct: (val / denom) * 100,
     }));
-  }, [pokemonChaos, rawCount]);
+  }, [pokemonChaos]);
 
   const popularTeraTypes = useMemo(() => {
     if (!pokemonChaos?.['Tera Types']) return [];
-    return sortByValue(pokemonChaos['Tera Types']).map(([name, val]) => ({
-      name: formatTypeName(name), pct: (val / rawCount) * 100,
+    const entries = sortByValue(pokemonChaos['Tera Types']);
+    const denom = entries.reduce((s, [, v]) => s + v, 0) || 1;
+    return entries.map(([name, val]) => ({
+      name: formatTypeName(name), pct: (val / denom) * 100,
     }));
-  }, [pokemonChaos, rawCount]);
+  }, [pokemonChaos]);
 
   const popularSpreads = useMemo(() => {
     if (!pokemonChaos?.Spreads) return [];
-    return sortByValue(pokemonChaos.Spreads).map(([name, val]) => ({
+    const entries = sortByValue(pokemonChaos.Spreads);
+    const denom = entries.reduce((s, [, v]) => s + v, 0) || 1;
+    return entries.map(([name, val]) => ({
       spread: name,
       parsed: parseSpread(name),
-      pct: (val / rawCount) * 100,
+      pct: (val / denom) * 100,
     }));
-  }, [pokemonChaos, rawCount]);
+  }, [pokemonChaos]);
 
   // Select a Pokemon — fills ability, item, spread, tera but NOT moves
   function selectPokemon(name) {
