@@ -46,18 +46,75 @@ export async function fetchMoves() {
 /**
  * Parse a Showdown .js data file that exports a variable like:
  * exports.BattleItems = { ... };
+ *
+ * Uses a line-by-line parser (no eval / new Function) so it works
+ * under strict CSP and in every deployment environment.
  */
 function parseShowdownJS(text) {
-  // Strip the "exports.VariableName = " prefix and trailing semicolon
-  const match = text.match(/^[^=]+=\s*(.+);?\s*$/s);
-  if (!match) return {};
-  try {
-    // The data is valid JS object literal — use Function constructor to evaluate
-    return new Function('return ' + match[1].replace(/;\s*$/, ''))();
-  } catch (e) {
-    console.error('Failed to parse Showdown JS data:', e);
-    return {};
+  const result = {};
+  const lines = text.split('\n');
+  let currentKey = null;
+  let currentEntry = {};
+  let braceDepth = 0;
+  let inEntry = false;
+
+  for (const line of lines) {
+    // Detect a top-level entry start: single-tab indented key followed by {
+    if (!inEntry) {
+      const entryStart = line.match(/^\t(\w+):\s*\{/);
+      if (entryStart) {
+        currentKey = entryStart[1];
+        currentEntry = {};
+        braceDepth = 1;
+        inEntry = true;
+      }
+      continue;
+    }
+
+    // Inside an entry — count braces to know when it ends
+    for (const ch of line) {
+      if (ch === '{') braceDepth++;
+      else if (ch === '}') braceDepth--;
+    }
+
+    // Extract string properties at the second tab level
+    const strProp = line.match(/^\t\t(\w+):\s*"([^"]*)"/);
+    if (strProp) {
+      currentEntry[strProp[1]] = strProp[2];
+    }
+
+    // Extract number properties at the second tab level
+    const numProp = line.match(/^\t\t(\w+):\s*(-?\d+)/);
+    if (numProp && !strProp) {
+      currentEntry[numProp[1]] = Number(numProp[2]);
+    }
+
+    // Extract boolean/null at the second tab level
+    const boolProp = line.match(/^\t\t(\w+):\s*(true|false|null)\b/);
+    if (boolProp) {
+      currentEntry[boolProp[1]] = boolProp[2] === 'true' ? true : boolProp[2] === 'false' ? false : null;
+    }
+
+    // Extract simple string arrays (e.g., types: ["Fire", "Flying"])
+    const arrProp = line.match(/^\t\t(\w+):\s*\[([^\]]*)\]/);
+    if (arrProp) {
+      currentEntry[arrProp[1]] = arrProp[2]
+        .split(',')
+        .map(s => s.trim().replace(/^"|"$/g, ''))
+        .filter(Boolean);
+    }
+
+    if (braceDepth === 0) {
+      // Entry complete
+      if (currentKey) {
+        result[currentKey] = currentEntry;
+      }
+      inEntry = false;
+      currentKey = null;
+    }
   }
+
+  return result;
 }
 
 /**
