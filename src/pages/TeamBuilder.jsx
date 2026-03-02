@@ -2,12 +2,12 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useTeam } from '../context/TeamContext';
 import { useApp } from '../context/AppContext';
 import { exportTeamToShowdown, importTeamFromShowdown, createEmptyPokemon, createEmptyTeam } from '../utils/exportShowdown';
-import { fetchChaosData, getPokemonFromChaos, getUsageListFromChaos } from '../services/smogonApi';
+import { fetchChaosData, getPokemonFromChaos, getUsageListFromChaos, fetchMonotypeChaosData } from '../services/smogonApi';
 import { getPokemonTypes, formatMoveName, formatItemName, formatAbilityName, formatTypeName } from '../services/showdownData';
 import { TypeBadgeRow } from '../components/TypeBadge';
 import TypeBadge from '../components/TypeBadge';
 import FormatSelector from '../components/FormatSelector';
-import { NATURES, ALL_TYPES } from '../data/formats';
+import { NATURES, ALL_TYPES, isMonotypeFormat, hasMonotypeTypeData, getMonotypeFormatId } from '../data/formats';
 import { generateTypeMatrix, calculateSynergyScore, getTeamWeaknesses } from '../utils/typeAnalysis';
 import { getEffectivenessClass, getEffectivenessLabel, sortByValue, parseSpread } from '../utils/helpers';
 
@@ -27,11 +27,26 @@ export default function TeamBuilder() {
   const [chaosData, setChaosData] = useState(null);
   const [chaosLoading, setChaosLoading] = useState(false);
 
-  // Fetch chaos data for the selected format
+  // Monotype state
+  const isMonotype = isMonotypeFormat(formatId);
+  const hasTypeData = hasMonotypeTypeData(formatId);
+  const [selectedMonoType, setSelectedMonoType] = useState(null);
+
+  // Reset monotype selection when format changes
+  useEffect(() => {
+    setSelectedMonoType(null);
+  }, [formatId]);
+
+  // Fetch chaos data for the selected format (or per-type for monotype)
   useEffect(() => {
     let cancelled = false;
     setChaosLoading(true);
-    fetchChaosData(format.month, formatId, format.rating)
+
+    const fetchPromise = (hasTypeData && selectedMonoType)
+      ? fetchMonotypeChaosData(format.month, getMonotypeFormatId(formatId, selectedMonoType), format.rating)
+      : fetchChaosData(format.month, formatId, format.rating);
+
+    fetchPromise
       .then(data => {
         if (!cancelled) setChaosData(data);
       })
@@ -42,7 +57,7 @@ export default function TeamBuilder() {
         if (!cancelled) setChaosLoading(false);
       });
     return () => { cancelled = true; };
-  }, [format.month, formatId, format.rating]);
+  }, [format.month, formatId, format.rating, selectedMonoType, hasTypeData]);
 
   // Fetch types for team members
   useEffect(() => {
@@ -98,6 +113,48 @@ export default function TeamBuilder() {
 
       {/* Format selector */}
       <FormatSelector className="mb-6" />
+
+      {/* Monotype Type Selector */}
+      {isMonotype && hasTypeData && (
+        <div className="mb-6 glass-panel p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+              🏷️ Monotype — Select Your Type
+            </h3>
+            {selectedMonoType && (
+              <button
+                onClick={() => setSelectedMonoType(null)}
+                className="text-xs text-slate-400 hover:text-white transition-colors"
+              >
+                ✕ Show overall
+              </button>
+            )}
+          </div>
+          <p className="text-xs text-slate-500 mb-2">
+            Select a type to get suggestions specific to that monotype team.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {ALL_TYPES.map(type => {
+              const isSelected = selectedMonoType === type;
+              return (
+                <button
+                  key={type}
+                  onClick={() => setSelectedMonoType(isSelected ? null : type)}
+                  className={`transition-all duration-200 rounded-lg cursor-pointer hover:scale-105
+                    ${isSelected ? 'ring-2 ring-white ring-offset-2 ring-offset-slate-900 scale-105' : ''}`}
+                >
+                  <TypeBadge type={type} size="md" />
+                </button>
+              );
+            })}
+          </div>
+          {selectedMonoType && (
+            <p className="text-xs text-slate-400 mt-3">
+              Suggestions powered by <span className="text-white font-medium">{selectedMonoType}</span> monotype usage data.
+            </p>
+          )}
+        </div>
+      )}
 
       {chaosLoading && (
         <div className="mb-4 flex items-center gap-2 text-sm text-slate-500">

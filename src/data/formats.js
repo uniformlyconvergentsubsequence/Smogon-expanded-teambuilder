@@ -102,6 +102,43 @@ export const ALL_TYPES = [
   'Rock', 'Ghost', 'Dragon', 'Dark', 'Steel', 'Fairy',
 ];
 
+/**
+ * Monotype formats that have per-type data in the monotype/ subdirectory.
+ * Only gen9monotype has per-type chaos/usage data on Smogon.
+ * nationaldexmonotype does NOT have per-type breakdowns.
+ */
+export const MONOTYPE_FORMATS_WITH_TYPE_DATA = ['monotype'];
+
+/**
+ * All formats that are "monotype-like" (where type selection is relevant).
+ */
+export const MONOTYPE_TIERS = ['monotype', 'nationaldexmonotype'];
+
+/**
+ * Check if a format ID is a monotype format.
+ */
+export function isMonotypeFormat(formatId) {
+  return MONOTYPE_TIERS.some(t => formatId.includes(t));
+}
+
+/**
+ * Check if a format ID has per-type data available in the monotype/ subdirectory.
+ */
+export function hasMonotypeTypeData(formatId) {
+  // Only gen9monotype (not nationaldexmonotype) has per-type data
+  return MONOTYPE_FORMATS_WITH_TYPE_DATA.some(t => {
+    return formatId.endsWith(t) && !formatId.includes('nationaldex');
+  });
+}
+
+/**
+ * Get the monotype-typed format string (e.g., "gen9monotype" + "Steel" → "gen9monotype-monosteel")
+ */
+export function getMonotypeFormatId(formatId, type) {
+  if (!type) return formatId;
+  return `${formatId}-mono${type.toLowerCase()}`;
+}
+
 export function getFormatId(gen, tier) {
   return `gen${gen}${tier}`;
 }

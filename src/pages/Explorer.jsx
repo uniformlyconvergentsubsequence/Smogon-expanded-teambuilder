@@ -1,10 +1,11 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
-import { fetchChaosData, fetchUsageStats, fetchLeadsStats, fetchMetagameStats, getUsageListFromChaos } from '../services/smogonApi';
+import { fetchChaosData, fetchUsageStats, fetchLeadsStats, fetchMetagameStats, getUsageListFromChaos, fetchMonotypeChaosData, extractMonotypeUsage } from '../services/smogonApi';
 import { getPokemonTypes } from '../services/showdownData';
+import { isMonotypeFormat, hasMonotypeTypeData, getMonotypeFormatId, ALL_TYPES } from '../data/formats';
 import FormatSelector from '../components/FormatSelector';
-import { TypeBadgeRow } from '../components/TypeBadge';
+import TypeBadge, { TypeBadgeRow } from '../components/TypeBadge';
 import LoadingSpinner from '../components/LoadingSpinner';
 import StatBar from '../components/StatBar';
 import { formatPercent, toSlug, debounce } from '../utils/helpers';
@@ -28,6 +29,19 @@ export default function Explorer() {
   const [searchQuery, setSearchQuery] = useState('');
   const [pokemonTypes, setPokemonTypes] = useState({});
 
+  // Monotype state
+  const isMonotype = isMonotypeFormat(formatId);
+  const hasTypeData = hasMonotypeTypeData(formatId);
+  const [selectedMonoType, setSelectedMonoType] = useState(null); // null = show overall/type-usage overview
+  const [monoTypeLoading, setMonoTypeLoading] = useState(false);
+  const [typeUsageList, setTypeUsageList] = useState([]); // type usage from metagame data
+
+  // Reset monotype selection when format changes
+  useEffect(() => {
+    setSelectedMonoType(null);
+    setTypeUsageList([]);
+  }, [formatId]);
+
   // Apply search params on mount
   useEffect(() => {
     const gen = searchParams.get('gen');
@@ -36,7 +50,7 @@ export default function Explorer() {
     if (tier) setTier(tier);
   }, []);
 
-  // Fetch data when format changes
+  // Fetch data when format changes (or monotype selection changes)
   useEffect(() => {
     let cancelled = false;
 
@@ -45,23 +59,56 @@ export default function Explorer() {
       setError(null);
 
       try {
-        // Fetch chaos data (primary) and usage data (fallback) in parallel
-        const [chaos, usage] = await Promise.allSettled([
-          fetchChaosData(format.month, formatId, format.rating),
-          fetchUsageStats(format.month, formatId, format.rating),
-        ]);
+        if (hasTypeData && selectedMonoType) {
+          // Fetch per-type monotype data
+          const typedFormat = getMonotypeFormatId(formatId, selectedMonoType);
+          const [chaos, usage] = await Promise.allSettled([
+            fetchMonotypeChaosData(format.month, typedFormat, format.rating),
+            fetchUsageStats(format.month, typedFormat, format.rating).catch(() =>
+              // Try the monotype subdirectory too
+              fetchUsageStats(format.month, `monotype/${typedFormat}`, format.rating)
+            ),
+          ]);
 
-        if (cancelled) return;
+          if (cancelled) return;
 
-        if (chaos.status === 'fulfilled') {
-          setChaosData(chaos.value);
-        }
-        if (usage.status === 'fulfilled') {
-          setUsageData(usage.value);
-        }
+          if (chaos.status === 'fulfilled') {
+            setChaosData(chaos.value);
+          } else {
+            setChaosData(null);
+          }
+          if (usage.status === 'fulfilled') {
+            setUsageData(usage.value);
+          } else {
+            setUsageData(null);
+          }
 
-        if (chaos.status === 'rejected' && usage.status === 'rejected') {
-          setError('Failed to fetch stats data. The format/month combination may not be available.');
+          if (chaos.status === 'rejected' && usage.status === 'rejected') {
+            setError(`No data available for ${selectedMonoType} monotype.`);
+          }
+        } else {
+          // Fetch normal data (or overall monotype data)
+          const [chaos, usage] = await Promise.allSettled([
+            fetchChaosData(format.month, formatId, format.rating),
+            fetchUsageStats(format.month, formatId, format.rating),
+          ]);
+
+          if (cancelled) return;
+
+          if (chaos.status === 'fulfilled') {
+            setChaosData(chaos.value);
+          } else {
+            setChaosData(null);
+          }
+          if (usage.status === 'fulfilled') {
+            setUsageData(usage.value);
+          } else {
+            setUsageData(null);
+          }
+
+          if (chaos.status === 'rejected' && usage.status === 'rejected') {
+            setError('Failed to fetch stats data. The format/month combination may not be available.');
+          }
         }
       } catch (e) {
         if (!cancelled) setError(e.message);
@@ -72,12 +119,27 @@ export default function Explorer() {
 
     fetchData();
     return () => { cancelled = true; };
-  }, [format.month, formatId, format.rating]);
+  }, [format.month, formatId, format.rating, selectedMonoType, hasTypeData]);
 
-  // Fetch leads and metagame when those tabs are active
+  // Fetch metagame data (for type usage percentages) when monotype format is selected
+  useEffect(() => {
+    if (!isMonotype) return;
+    fetchMetagameStats(format.month, formatId, format.rating)
+      .then(data => {
+        setMetagameData(data);
+        const typeUsage = extractMonotypeUsage(data);
+        setTypeUsageList(typeUsage);
+      })
+      .catch(() => {});
+  }, [isMonotype, format.month, formatId, format.rating]);
+
+  // Fetch leads and metagame when those tabs are active (non-monotype or no type selected)
   useEffect(() => {
     if (activeTab === 'leads' && !leadsData) {
-      fetchLeadsStats(format.month, formatId, format.rating)
+      const leadsFormat = (hasTypeData && selectedMonoType)
+        ? getMonotypeFormatId(formatId, selectedMonoType)
+        : formatId;
+      fetchLeadsStats(format.month, leadsFormat, format.rating)
         .then(setLeadsData)
         .catch(() => {});
     }
@@ -86,13 +148,17 @@ export default function Explorer() {
         .then(setMetagameData)
         .catch(() => {});
     }
-  }, [activeTab, format.month, formatId, format.rating]);
+  }, [activeTab, format.month, formatId, format.rating, selectedMonoType, hasTypeData]);
 
-  // Reset loaded data when format changes
+  // Reset loaded data when format or monotype selection changes
   useEffect(() => {
     setLeadsData(null);
-    setMetagameData(null);
+    // Only reset metagame if format changes (not monotype selection)
   }, [format.month, formatId, format.rating]);
+
+  useEffect(() => {
+    setLeadsData(null);
+  }, [selectedMonoType]);
 
   // Get usage list from chaos data
   const usageList = useMemo(() => {
@@ -145,6 +211,60 @@ export default function Explorer() {
       </div>
 
       <FormatSelector className="mb-6" />
+
+      {/* Monotype Type Selector */}
+      {isMonotype && (
+        <div className="mb-6 glass-panel p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+              🏷️ Monotype Filter
+            </h3>
+            {selectedMonoType && (
+              <button
+                onClick={() => setSelectedMonoType(null)}
+                className="text-xs text-slate-400 hover:text-white transition-colors"
+              >
+                ✕ Clear selection
+              </button>
+            )}
+          </div>
+          {!hasTypeData && (
+            <p className="text-xs text-slate-500 mb-2">
+              Per-type usage data is only available for Gen 9 Monotype. Showing type popularity overview only.
+            </p>
+          )}
+          <div className="flex flex-wrap gap-2">
+            {ALL_TYPES.map(type => {
+              const typeUsage = typeUsageList.find(t => t.type.toLowerCase() === type.toLowerCase());
+              const isSelected = selectedMonoType === type;
+              return (
+                <button
+                  key={type}
+                  onClick={() => hasTypeData && setSelectedMonoType(isSelected ? null : type)}
+                  disabled={!hasTypeData}
+                  className={`relative group transition-all duration-200 rounded-lg
+                    ${hasTypeData ? 'cursor-pointer hover:scale-105' : 'cursor-default opacity-80'}
+                    ${isSelected ? 'ring-2 ring-white ring-offset-2 ring-offset-slate-900 scale-105' : ''}`}
+                >
+                  <TypeBadge type={type} size="md" />
+                  {typeUsage && (
+                    <span className={`block text-[10px] mt-0.5 text-center font-mono
+                      ${isSelected ? 'text-white' : 'text-slate-400'}`}>
+                      {typeUsage.usage.toFixed(1)}%
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+          {selectedMonoType && (
+            <p className="text-xs text-slate-400 mt-3">
+              Showing usage stats for <span className="text-white font-medium">{selectedMonoType}</span> monotype teams
+              {monoTypeLoading && ' — Loading...'}
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex items-center gap-1 mb-6 bg-slate-900/50 p-1 rounded-lg border border-slate-800 w-fit">

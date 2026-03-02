@@ -195,12 +195,37 @@ export async function fetchMovesetStats(month, format, rating = '1695') {
 }
 
 /**
- * Fetch monotype usage stats
+ * Fetch monotype usage stats (text format — overall or per-type)
  */
 export async function fetchMonotypeStats(month, format, rating = '0') {
   const url = buildStatsUrl(month, 'monotype', format, rating);
   const text = await cachedFetch(url, 'text');
   return parseUsageStats(text);
+}
+
+/**
+ * Fetch monotype chaos data (per-type JSON).
+ * E.g., format = 'gen9monotype-monosteel', fetched from monotype/chaos/ subdir.
+ */
+export async function fetchMonotypeChaosData(month, format, rating = '0') {
+  const url = `${SMOGON_STATS_BASE}/${month}/monotype/chaos/${format}-${rating}.json`;
+  return cachedFetch(url, 'json');
+}
+
+/**
+ * Extract type usage percentages from the metagame playstyle data.
+ * Returns an array of { type, name, usage } sorted by usage desc.
+ */
+export function extractMonotypeUsage(metagameData) {
+  if (!metagameData || !metagameData.playstyles) return [];
+  return metagameData.playstyles
+    .filter(p => p.name.startsWith('mono') && p.name !== 'monotype')
+    .map(p => {
+      const rawType = p.name.replace(/^mono/, '');
+      const name = rawType.charAt(0).toUpperCase() + rawType.slice(1);
+      return { type: rawType, name, usage: p.usage };
+    })
+    .sort((a, b) => b.usage - a.usage);
 }
 
 // ====== Parsers ======
