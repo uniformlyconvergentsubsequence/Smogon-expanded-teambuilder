@@ -3,11 +3,28 @@ import { lazy, Suspense } from 'react';
 import Layout from './components/Layout';
 import LoadingSpinner from './components/LoadingSpinner';
 
-const Home = lazy(() => import('./pages/Home'));
-const Explorer = lazy(() => import('./pages/Explorer'));
-const PokemonDetail = lazy(() => import('./pages/PokemonDetail'));
-const TeamBuilder = lazy(() => import('./pages/TeamBuilder'));
-const AIAssistant = lazy(() => import('./pages/AIAssistant'));
+// Retry wrapper for lazy imports — handles stale chunks after redeployment
+function lazyRetry(importFn) {
+  return lazy(() =>
+    importFn().catch(() => {
+      // Chunk failed (likely stale hash after redeploy) — force reload once
+      const reloaded = sessionStorage.getItem('chunk-reload');
+      if (!reloaded) {
+        sessionStorage.setItem('chunk-reload', '1');
+        window.location.reload();
+        return new Promise(() => {}); // never resolves — page is reloading
+      }
+      sessionStorage.removeItem('chunk-reload');
+      return importFn(); // retry once more, then let it fail naturally
+    })
+  );
+}
+
+const Home = lazyRetry(() => import('./pages/Home'));
+const Explorer = lazyRetry(() => import('./pages/Explorer'));
+const PokemonDetail = lazyRetry(() => import('./pages/PokemonDetail'));
+const TeamBuilder = lazyRetry(() => import('./pages/TeamBuilder'));
+const AIAssistant = lazyRetry(() => import('./pages/AIAssistant'));
 
 function App() {
   return (

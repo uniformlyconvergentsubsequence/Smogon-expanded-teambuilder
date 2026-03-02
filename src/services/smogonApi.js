@@ -480,27 +480,24 @@ export function getCacheInfo() {
   };
 }
 
-// ====== Idle Preloader ======
-// Preloads format data in the background during browser idle time.
-// Priority: current format's ratings → popular formats in same gen → other gens.
+// ====== Eager Format Preloader ======
+// Immediately preloads the most popular format combos, then fills in the rest during idle.
 
-const POPULAR_TIERS = ['ou', 'uu', 'ru', 'nu', 'ubers', 'doublesou', 'lc', 'monotype', 'pu',
-  'nationaldex', 'vgc2026', 'vgc2025', 'anythinggoes', 'zu', 'balancedhackmons',
-  'nationaldexuu', 'cap', '1v1', 'doublesuu', 'doublesubers',
+const PRIORITY_TIERS = ['ou', 'uu', 'ru', 'nu', 'ubers', 'pu', 'doublesou', 'lc', 'monotype', 'zu'];
+const SECONDARY_TIERS = ['nationaldex', 'vgc2026', 'vgc2025', 'anythinggoes',
+  'balancedhackmons', 'nationaldexuu', 'cap', '1v1', 'doublesuu', 'doublesubers',
   'nationaldexru', 'nationaldexmonotype', 'nationaldexubers',
   'almostanyability', 'mixandmega', 'nfe', 'stabmons', 'godlygift',
   'battlestadiumsingles', 'battlestadiumsinglesregi'];
 
-let idlePreloaderHandle = null;
-let idleQueue = [];
-let idleActive = false;
-const MAX_CONCURRENT_IDLE = 2; // limit parallel fetches during idle
-let idleInFlight = 0;
+let preloaderRunning = false;
+let preloaderAbort = false;
 
 /**
  * Check whether a chaos URL is already cached (memory or sessionStorage).
  */
-function isCached(url) {
+function isChaosUrlCached(month, format, rating) {
+  const url = buildStatsUrl(month, 'chaos', format, rating);
   const cacheKey = url + ':json';
   const memCached = cache.get(cacheKey);
   if (memCached && Date.now() - memCached.timestamp < CACHE_DURATION) return true;
@@ -509,49 +506,30 @@ function isCached(url) {
 }
 
 /**
- * Process one item from the idle queue.
+ * Fetch a batch of formats concurrently (up to `concurrency` at a time).
+ * Resolves after all are done. Skips already-cached entries.
  */
-function processIdleQueue(deadline) {
-  // Process items while there's idle time (or at least 5ms) and items remain
-  while (idleQueue.length > 0 && idleInFlight < MAX_CONCURRENT_IDLE) {
-    // Check if we have time left (give at least 5ms per task)
-    if (deadline && deadline.timeRemaining() < 5) break;
-
-    const { month, format, rating } = idleQueue.shift();
-    const chaosUrl = buildStatsUrl(month, 'chaos', format, rating);
-
-    if (isCached(chaosUrl)) continue; // already have it
-
-    idleInFlight++;
-    fetchChaosData(month, format, rating)
-      .catch(() => {}) // silently ignore failures
-      .finally(() => {
-        idleInFlight--;
-        // Schedule more work if there's still items in the queue
-        if (idleQueue.length > 0 && idleActive) {
-          scheduleIdle();
-        }
-      });
-  }
-
-  // If there are still items, schedule another idle callback
-  if (idleQueue.length > 0 && idleActive) {
-    scheduleIdle();
-  }
-}
-
-function scheduleIdle() {
-  if (typeof requestIdleCallback !== 'undefined') {
-    idlePreloaderHandle = requestIdleCallback(processIdleQueue, { timeout: 10000 });
-  } else {
-    // Fallback for Safari: use setTimeout with a generous delay
-    idlePreloaderHandle = setTimeout(() => processIdleQueue({ timeRemaining: () => 50 }), 2000);
-  }
+async function fetchBatch(items, concurrency = 3) {
+  let i = 0;
+  const next = async () => {
+    while (i < items.length && !preloaderAbort) {
+      const idx = i++;
+      const { month, format, rating } = items[idx];
+      if (isChaosUrlCached(month, format, rating)) continue;
+      try {
+        await fetchChaosData(month, format, rating);
+      } catch (_) { /* ignore */ }
+      // Small yield so we don't block the main thread
+      await new Promise(r => setTimeout(r, 50));
+    }
+  };
+  const workers = Array.from({ length: concurrency }, () => next());
+  await Promise.all(workers);
 }
 
 /**
- * Start the idle preloader. Builds a priority queue of formats to preload
- * based on the user's current format selection.
+ * Start preloading formats. Immediately fetches the most popular ones,
+ * then moves on to less common formats.
  *
  * @param {string} month - Current month
  * @param {number} currentGen - Current generation number
@@ -559,64 +537,73 @@ function scheduleIdle() {
  * @param {string} defaultRating - Rating to preload (default: '1695')
  */
 export function startIdlePreloader(month, currentGen, currentTier, defaultRating = '1695') {
-  // Stop any existing preloader
   stopIdlePreloader();
+  preloaderAbort = false;
+  preloaderRunning = true;
 
-  idleQueue = [];
-  idleActive = true;
+  // Build priority queue
+  const priority1 = []; // Same gen, popular tiers
+  const priority2 = []; // Same tier, other gens
+  const priority3 = []; // Other popular combos
 
-  // Get all months
-  const months = [month]; // Just preload current month — other month is lower priority
+  // Priority 1: Other popular tiers in the current gen
+  for (const tier of PRIORITY_TIERS) {
+    if (tier === currentTier) continue;
+    priority1.push({ month, format: `gen${currentGen}${tier}`, rating: defaultRating });
+  }
 
-  for (const m of months) {
-    // Priority 1: Other tiers in the same gen (most likely switch)
-    for (const tier of POPULAR_TIERS) {
-      if (tier === currentTier) continue;
-      idleQueue.push({ month: m, format: `gen${currentGen}${tier}`, rating: defaultRating });
-    }
-
-    // Priority 2: Same tier in neighboring gens
-    for (let gen = 9; gen >= 1; gen--) {
-      if (gen === currentGen) continue;
-      idleQueue.push({ month: m, format: `gen${gen}${currentTier}`, rating: defaultRating });
-    }
-
-    // Priority 3: Popular combos in other gens (OU is the most common)
-    const popularTierSubset = ['ou', 'uu', 'ubers', 'doublesou'];
-    for (let gen = 9; gen >= 1; gen--) {
-      if (gen === currentGen) continue;
-      for (const tier of popularTierSubset) {
-        if (tier === currentTier) continue; // already queued in Priority 2
-        idleQueue.push({ month: m, format: `gen${gen}${tier}`, rating: defaultRating });
-      }
+  // Priority 2: Same tier in other gens + OU in other gens
+  for (let gen = 9; gen >= 1; gen--) {
+    if (gen === currentGen) continue;
+    priority2.push({ month, format: `gen${gen}${currentTier}`, rating: defaultRating });
+    if (currentTier !== 'ou') {
+      priority2.push({ month, format: `gen${gen}ou`, rating: defaultRating });
     }
   }
 
-  // Deduplicate
-  const seen = new Set();
-  idleQueue = idleQueue.filter(item => {
-    const key = `${item.month}:${item.format}:${item.rating}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  // Priority 3: Secondary tiers in current gen + popular tiers in other gens
+  for (const tier of SECONDARY_TIERS) {
+    if (tier === currentTier) continue;
+    priority3.push({ month, format: `gen${currentGen}${tier}`, rating: defaultRating });
+  }
+  for (let gen = 9; gen >= 1; gen--) {
+    if (gen === currentGen) continue;
+    for (const tier of PRIORITY_TIERS) {
+      if (tier === currentTier || tier === 'ou') continue; // already in priority2
+      priority3.push({ month, format: `gen${gen}${tier}`, rating: defaultRating });
+    }
+  }
 
-  // Start processing
-  scheduleIdle();
+  // Deduplicate each batch
+  const dedup = (items) => {
+    const seen = new Set();
+    return items.filter(item => {
+      const key = `${item.month}:${item.format}:${item.rating}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+
+  const p1 = dedup(priority1);
+  const p2 = dedup(priority2);
+  const p3 = dedup(priority3);
+
+  // Run: priority 1 immediately (3 concurrent), then 2, then 3
+  (async () => {
+    await fetchBatch(p1, 3);
+    if (preloaderAbort) return;
+    await fetchBatch(p2, 2);
+    if (preloaderAbort) return;
+    await fetchBatch(p3, 2);
+    preloaderRunning = false;
+  })();
 }
 
 /**
- * Stop the idle preloader.
+ * Stop the preloader.
  */
 export function stopIdlePreloader() {
-  idleActive = false;
-  if (idlePreloaderHandle) {
-    if (typeof cancelIdleCallback !== 'undefined') {
-      cancelIdleCallback(idlePreloaderHandle);
-    } else {
-      clearTimeout(idlePreloaderHandle);
-    }
-    idlePreloaderHandle = null;
-  }
-  idleQueue = [];
+  preloaderAbort = true;
+  preloaderRunning = false;
 }
