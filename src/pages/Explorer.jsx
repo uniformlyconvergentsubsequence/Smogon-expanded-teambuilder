@@ -160,12 +160,15 @@ export default function Explorer() {
     setLeadsData(null);
   }, [selectedMonoType]);
 
-  // Get usage list from chaos data
+  // Get usage list from chaos data or text usage data
   const usageList = useMemo(() => {
     if (chaosData) return getUsageListFromChaos(chaosData);
-    if (usageData) return usageData.pokemon || [];
+    if (usageData && usageData.pokemon && usageData.pokemon.length > 0) return usageData.pokemon;
     return [];
   }, [chaosData, usageData]);
+
+  // Determine if we truly have no data (not just loading)
+  const hasNoData = !loading && !error && usageList.length === 0;
 
   // Filter by search
   const filteredList = useMemo(() => {
@@ -285,16 +288,17 @@ export default function Explorer() {
 
       {loading && <LoadingSpinner text="Fetching stats data..." />}
 
-      {error && (
+      {(error || hasNoData) && (
         <div className="glass-panel p-6 text-center">
-          <p className="text-red-400 mb-2">⚠️ {error}</p>
+          <p className="text-amber-400 mb-2">⚠️ {error || `No usage data available for ${formatId}.`}</p>
           <p className="text-sm text-slate-500">
-            Try a different format, month, or rating cutoff. Not all combinations have data available.
+            This format/month/rating combination may not have enough ladder activity to generate stats.
+            Try a different format, month, or rating cutoff.
           </p>
         </div>
       )}
 
-      {!loading && !error && (
+      {!loading && !error && !hasNoData && (
         <>
           {activeTab === 'usage' && (
             <UsageTab

@@ -150,21 +150,55 @@ function buildStatsUrl(month, subdir, format, rating) {
 }
 
 /**
- * Fetch the chaos (detailed JSON) data for a format
- * This is the richest data source with movesets, items, abilities, teammates, etc.
+ * Fetch the chaos (detailed JSON) data for a format.
+ * Tries the requested rating first, then falls back to lower ratings.
  */
 export async function fetchChaosData(month, format, rating = '1695') {
-  const url = buildStatsUrl(month, 'chaos', format, rating);
-  return cachedFetch(url, 'json');
+  // Try requested rating first
+  try {
+    const url = buildStatsUrl(month, 'chaos', format, rating);
+    return await cachedFetch(url, 'json');
+  } catch (e) {
+    // If not the base rating, try falling back
+    if (rating !== '0') {
+      const fallbacks = ['1500', '0'].filter(r => r !== rating);
+      for (const fb of fallbacks) {
+        try {
+          const url = buildStatsUrl(month, 'chaos', format, fb);
+          return await cachedFetch(url, 'json');
+        } catch (_) { continue; }
+      }
+    }
+    throw e;
+  }
 }
 
 /**
  * Fetch usage stats (text format) and parse into structured data
  */
+/**
+ * Fetch usage stats (text format) and parse into structured data.
+ * Tries the requested rating first, then falls back to lower ratings.
+ */
 export async function fetchUsageStats(month, format, rating = '0') {
-  const url = buildStatsUrl(month, '', format, rating);
-  const text = await cachedFetch(url, 'text');
-  return parseUsageStats(text);
+  try {
+    const url = buildStatsUrl(month, '', format, rating);
+    const text = await cachedFetch(url, 'text');
+    const result = parseUsageStats(text);
+    if (result.pokemon.length === 0) throw new Error('Empty usage data');
+    return result;
+  } catch (e) {
+    if (rating !== '0') {
+      try {
+        const url = buildStatsUrl(month, '', format, '0');
+        const text = await cachedFetch(url, 'text');
+        const result = parseUsageStats(text);
+        if (result.pokemon.length === 0) throw new Error('Empty usage data');
+        return result;
+      } catch (_) {}
+    }
+    throw e;
+  }
 }
 
 /**
