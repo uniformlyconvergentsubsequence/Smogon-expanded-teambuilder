@@ -163,6 +163,17 @@ export default function TeamBuilder() {
         </div>
       )}
 
+      {!chaosLoading && !chaosData && (
+        <div className="mb-4 glass-panel p-4 border border-amber-800/30 bg-amber-900/10">
+          <p className="text-sm text-amber-400">
+            ⚠️ No usage data available for <span className="font-medium text-white">{formatId}</span>.
+          </p>
+          <p className="text-xs text-slate-500 mt-1">
+            This format may not have enough ladder activity to generate stats. You can still build a team manually.
+          </p>
+        </div>
+      )}
+
       {/* Team selector tabs */}
       <div className="flex items-center gap-2 mb-6 overflow-x-auto pb-2">
         {teams.map((team, i) => (

@@ -365,10 +365,12 @@ export default function PokemonDetail() {
                 <h3 className="font-semibold text-white mb-4 text-sm">🛡️ Checks & Counters</h3>
                 <div className="space-y-2">
                   {Object.entries(pokemonInfo['Checks and Counters'])
-                    .sort(([, a], [, b]) => (b[0] || 0) - (a[0] || 0))
+                    .sort(([, a], [, b]) => (b[1] || 0) - (a[1] || 0))
                     .slice(0, 12)
                     .map(([name, data]) => {
-                      const [koed, switched, unknown] = Array.isArray(data) ? data : [0, 0, 0];
+                      // data = [score, winRate (0-1), stddev]
+                      const [, winRate, stddev] = Array.isArray(data) ? data : [0, 0, 0];
+                      const pct = (winRate || 0) * 100;
                       return (
                         <Link
                           key={name}
@@ -384,8 +386,8 @@ export default function PokemonDetail() {
                           />
                           <span className="text-sm text-slate-300 group-hover:text-white transition-colors flex-1">{name}</span>
                           <div className="text-right">
-                            <span className="text-xs font-mono text-red-400">{koed?.toFixed(1)}%</span>
-                            <span className="text-xs text-slate-600 mx-1">KO'd</span>
+                            <span className="text-xs font-mono text-red-400">{pct.toFixed(1)}%</span>
+                            <span className="text-xs text-slate-600 mx-1">win</span>
                           </div>
                         </Link>
                       );
