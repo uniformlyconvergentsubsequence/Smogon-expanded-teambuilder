@@ -135,8 +135,10 @@ export function generateTypeMatrix(teamMembers) {
 
 /**
  * Suggest types that would complement the team defensively
+ * @param {Array} teamMembers - The current team members
+ * @param {string|null} monoType - If set, only suggest combos that include this type (for monotype formats)
  */
-export function suggestDefensiveTypes(teamMembers) {
+export function suggestDefensiveTypes(teamMembers, monoType = null) {
   const weaknesses = getTeamWeaknesses(teamMembers);
   const biggestWeaknesses = weaknesses
     .filter(w => w.score > 0)
@@ -150,7 +152,12 @@ export function suggestDefensiveTypes(teamMembers) {
     for (const type2 of TYPE_LIST) {
       if (TYPE_LIST.indexOf(type1) > TYPE_LIST.indexOf(type2)) continue; // avoid duplicates
 
-      const matchups = getTypeMatchups(type1 === type2 ? [type1] : [type1, type2]);
+      const types = type1 === type2 ? [type1] : [type1, type2];
+
+      // For monotype formats, only suggest combos that include the monotype type
+      if (monoType && !types.some(t => t.toLowerCase() === monoType.toLowerCase())) continue;
+
+      const matchups = getTypeMatchups(types);
       let score = 0;
 
       for (const weakness of biggestWeaknesses) {
@@ -160,7 +167,7 @@ export function suggestDefensiveTypes(teamMembers) {
 
       if (score > 0) {
         suggestions.push({
-          types: type1 === type2 ? [type1] : [type1, type2],
+          types,
           score,
           resistedWeaknesses: biggestWeaknesses.filter(w => matchups[w] < 1),
         });

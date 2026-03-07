@@ -93,6 +93,7 @@ function teamReducer(state, action) {
     case 'ADD_TEAM': {
       const newTeam = {
         name: action.name || `Team ${state.teams.length + 1}`,
+        formatId: action.formatId || '',
         pokemon: createEmptyTeam(),
       };
       newState = {
@@ -100,6 +101,13 @@ function teamReducer(state, action) {
         teams: [...state.teams, newTeam],
         currentTeamIndex: state.teams.length,
       };
+      break;
+    }
+
+    case 'SET_TEAM_FORMAT': {
+      const teams = [...state.teams];
+      teams[state.currentTeamIndex] = { ...teams[state.currentTeamIndex], formatId: action.formatId };
+      newState = { ...state, teams };
       break;
     }
 
@@ -158,8 +166,10 @@ export function TeamProvider({ children }) {
       dispatch({ type: 'SET_TEAM', pokemon }),
     setTeamName: (name) =>
       dispatch({ type: 'SET_TEAM_NAME', name }),
-    addTeam: (name) =>
-      dispatch({ type: 'ADD_TEAM', name }),
+    addTeam: (name, formatId) =>
+      dispatch({ type: 'ADD_TEAM', name, formatId }),
+    setTeamFormat: (formatId) =>
+      dispatch({ type: 'SET_TEAM_FORMAT', formatId }),
     deleteTeam: (index) =>
       dispatch({ type: 'DELETE_TEAM', index }),
     selectTeam: (index) =>

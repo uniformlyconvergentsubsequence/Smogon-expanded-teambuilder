@@ -14,7 +14,7 @@ import { getEffectivenessClass, getEffectivenessLabel, sortByValue, parseSpread 
 export default function TeamBuilder() {
   const {
     teams, currentTeamIndex, currentTeam,
-    setPokemon, clearSlot, setTeamName, addTeam, deleteTeam, selectTeam, importTeam
+    setPokemon, clearSlot, setTeamName, addTeam, deleteTeam, selectTeam, importTeam, setTeamFormat
   } = useTeam();
   const { format, formatId } = useApp();
   const [editingSlot, setEditingSlot] = useState(null);
@@ -31,6 +31,13 @@ export default function TeamBuilder() {
   const isMonotype = isMonotypeFormat(formatId);
   const hasTypeData = hasMonotypeTypeData(formatId);
   const [selectedMonoType, setSelectedMonoType] = useState(null);
+
+  // Keep team's stored formatId in sync with the current format
+  useEffect(() => {
+    if (formatId && currentTeam.formatId !== formatId) {
+      setTeamFormat(formatId);
+    }
+  }, [formatId, currentTeam.formatId]);
 
   // Reset monotype selection when format changes
   useEffect(() => {
@@ -198,7 +205,7 @@ export default function TeamBuilder() {
           </button>
         ))}
         <button
-          onClick={() => addTeam()}
+          onClick={() => addTeam(undefined, formatId)}
           className="px-3 py-1.5 rounded-lg text-sm text-slate-500 hover:text-white hover:bg-slate-800 transition-all"
         >
           + New

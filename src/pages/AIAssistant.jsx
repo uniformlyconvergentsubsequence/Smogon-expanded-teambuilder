@@ -9,10 +9,11 @@ import { getTeamWeaknesses, suggestDefensiveTypes, calculateSynergyScore } from 
 import { TYPE_LIST, getTypeMatchups } from '../data/typeChart';
 import { exportTeamToShowdown } from '../utils/exportShowdown';
 import { sortByValue } from '../utils/helpers';
+import { isMonotypeFormat } from '../data/formats';
 
 export default function AIAssistant() {
   const { currentTeam } = useTeam();
-  const { format, formatId, aiApiKey, setAiKey, aiProvider, setAiProvider } = useApp();
+  const { format, formatId: globalFormatId, aiApiKey, setAiKey, aiProvider, setAiProvider } = useApp();
   const [teamTypes, setTeamTypes] = useState({});
   const [chaosData, setChaosData] = useState(null);
   const [chatMessages, setChatMessages] = useState([]);
@@ -20,6 +21,10 @@ export default function AIAssistant() {
   const [chatLoading, setChatLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('analysis');
   const chatEndRef = useRef(null);
+
+  // Use the team's stored format if available, otherwise fall back to global format
+  const teamFormatId = currentTeam.formatId || globalFormatId;
+  const formatId = teamFormatId;
 
   // Load types for team members
   useEffect(() => {
@@ -38,7 +43,7 @@ export default function AIAssistant() {
     load();
   }, [currentTeam.pokemon]);
 
-  // Load chaos data for suggestions
+  // Load chaos data for suggestions — use team's format
   useEffect(() => {
     fetchChaosData(format.month, formatId, format.rating)
       .then(setChaosData)
@@ -54,7 +59,23 @@ export default function AIAssistant() {
 
   const weaknesses = teamMembers.length > 0 ? getTeamWeaknesses(teamMembers) : [];
   const synergyScore = teamMembers.length >= 2 ? calculateSynergyScore(teamMembers) : null;
-  const typeSuggestions = teamMembers.length >= 2 ? suggestDefensiveTypes(teamMembers) : [];
+
+  // Detect monotype: if all team members share a common type, use it as constraint
+  const detectedMonoType = useMemo(() => {
+    if (!isMonotypeFormat(formatId) || teamMembers.length === 0) return null;
+    const membersWithTypes = teamMembers.filter(m => m.types.length > 0);
+    if (membersWithTypes.length === 0) return null;
+    // Find the type shared by ALL members
+    const firstTypes = membersWithTypes[0].types;
+    for (const type of firstTypes) {
+      if (membersWithTypes.every(m => m.types.some(t => t.toLowerCase() === type.toLowerCase()))) {
+        return type;
+      }
+    }
+    return null;
+  }, [formatId, teamMembers]);
+
+  const typeSuggestions = teamMembers.length >= 2 ? suggestDefensiveTypes(teamMembers, detectedMonoType) : [];
 
   // Biggest threats: top usage Pokemon whose types the team is weak to
   const biggestThreats = useMemo(() => {
@@ -97,17 +118,21 @@ export default function AIAssistant() {
       const pData = getPokemonFromChaos(chaosData, member.species);
       if (!pData || !pData.Teammates) continue;
 
+      // Use Raw count as denominator to get true percentage
+      const rawCount = pData['Raw count'] || 1;
+
       for (const [name, value] of Object.entries(pData.Teammates)) {
         if (teamMembers.some(m => m.species === name)) continue; // skip already on team
-        if (!allTeammates[name]) allTeammates[name] = { score: 0, fromPokemon: [] };
-        allTeammates[name].score += value;
+        if (!allTeammates[name]) allTeammates[name] = { totalPct: 0, fromPokemon: [] };
+        // Convert raw count to percentage: value/rawCount = fraction of this mon's teams with that teammate
+        allTeammates[name].totalPct += (value / rawCount) * 100;
         allTeammates[name].fromPokemon.push(member.species);
       }
     }
 
     return Object.entries(allTeammates)
-      .map(([name, data]) => ({ name, ...data }))
-      .sort((a, b) => b.score - a.score)
+      .map(([name, data]) => ({ name, pct: data.totalPct / teamMembers.length, fromPokemon: data.fromPokemon }))
+      .sort((a, b) => b.pct - a.pct)
       .slice(0, 10);
   }, [chaosData, teamMembers]);
 
@@ -368,6 +393,11 @@ Help them with team building, strategy, matchup analysis, and suggestions. Be co
               <h3 className="font-semibold text-white mb-4">🧩 Recommended Type Combos to Add</h3>
               <p className="text-xs text-slate-500 mb-3">
                 Types that would help cover your team's weaknesses.
+                {detectedMonoType && (
+                  <span className="ml-1 text-blue-400">
+                    (filtered for {detectedMonoType}-type monotype)
+                  </span>
+                )}
               </p>
               <div className="grid sm:grid-cols-2 gap-3">
                 {typeSuggestions.slice(0, 6).map((s, i) => (
@@ -405,7 +435,7 @@ Help them with team building, strategy, matchup analysis, and suggestions. Be co
                       </p>
                     </div>
                     <span className="text-xs font-mono text-emerald-400">
-                      +{(s.score * 100).toFixed(1)}%
+                      {s.pct.toFixed(1)}%
                     </span>
                   </div>
                 ))}
