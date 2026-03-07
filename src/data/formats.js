@@ -216,6 +216,6 @@ export function getAnimatedSpriteUrl(pokemon) {
 export const DEFAULT_FORMAT = {
   gen: 9,
   tier: 'ou',
-  month: '2026-01',
+  month: getAvailableMonths()[0].id,
   rating: '1695',
 };

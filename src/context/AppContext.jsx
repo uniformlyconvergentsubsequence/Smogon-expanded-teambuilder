@@ -1,5 +1,5 @@
 import { createContext, useContext, useReducer, useState, useEffect, useCallback } from 'react';
-import { DEFAULT_FORMAT, RATING_CUTOFFS } from '../data/formats';
+import { DEFAULT_FORMAT, RATING_CUTOFFS, getAvailableMonths } from '../data/formats';
 import { fetchAvailableRatings, preloadRatings, startIdlePreloader, stopIdlePreloader } from '../services/smogonApi';
 
 const AppContext = createContext(null);
@@ -7,14 +7,22 @@ const AppContext = createContext(null);
 const STORAGE_KEY = 'smogon-teambuilder-settings';
 
 function loadSettings() {
+  const latestMonth = getAvailableMonths()[0]?.id || DEFAULT_FORMAT.month;
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) return JSON.parse(saved);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      // Always update to the most recent available month
+      if (parsed.format) {
+        parsed.format.month = latestMonth;
+      }
+      return parsed;
+    }
   } catch (e) {
     console.error('Failed to load settings:', e);
   }
   return {
-    format: { ...DEFAULT_FORMAT },
+    format: { ...DEFAULT_FORMAT, month: latestMonth },
     aiApiKey: '',
     aiProvider: 'openai', // 'openai' or 'anthropic'
   };
