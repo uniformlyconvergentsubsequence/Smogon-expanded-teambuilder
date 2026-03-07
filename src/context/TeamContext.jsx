@@ -1,5 +1,6 @@
 import { createContext, useContext, useReducer, useEffect } from 'react';
 import { createEmptyTeam } from '../utils/exportShowdown';
+import { getAvailableMonths } from '../data/formats';
 
 const TeamContext = createContext(null);
 
@@ -94,6 +95,7 @@ function teamReducer(state, action) {
       const newTeam = {
         name: action.name || `Team ${state.teams.length + 1}`,
         formatId: action.formatId || '',
+        format: action.format || null,
         pokemon: createEmptyTeam(),
       };
       newState = {
@@ -106,7 +108,11 @@ function teamReducer(state, action) {
 
     case 'SET_TEAM_FORMAT': {
       const teams = [...state.teams];
-      teams[state.currentTeamIndex] = { ...teams[state.currentTeamIndex], formatId: action.formatId };
+      teams[state.currentTeamIndex] = {
+        ...teams[state.currentTeamIndex],
+        formatId: action.formatId,
+        format: action.format || null,
+      };
       newState = { ...state, teams };
       break;
     }
@@ -166,10 +172,14 @@ export function TeamProvider({ children }) {
       dispatch({ type: 'SET_TEAM', pokemon }),
     setTeamName: (name) =>
       dispatch({ type: 'SET_TEAM_NAME', name }),
-    addTeam: (name, formatId) =>
-      dispatch({ type: 'ADD_TEAM', name, formatId }),
-    setTeamFormat: (formatId) =>
-      dispatch({ type: 'SET_TEAM_FORMAT', formatId }),
+    addTeam: (name, formatId, format) =>
+      dispatch({ type: 'ADD_TEAM', name, formatId, format }),
+    setTeamFormat: (formatId, format) =>
+      dispatch({ type: 'SET_TEAM_FORMAT', formatId, format }),
+    getTeamFormat: () => {
+      const team = state.teams[state.currentTeamIndex];
+      return team?.format || null;
+    },
     deleteTeam: (index) =>
       dispatch({ type: 'DELETE_TEAM', index }),
     selectTeam: (index) =>

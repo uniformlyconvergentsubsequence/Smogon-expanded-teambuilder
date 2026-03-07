@@ -143,6 +143,21 @@ export function getFormatId(gen, tier) {
   return `gen${gen}${tier}`;
 }
 
+/**
+ * Parse a formatId string (e.g. "gen9monotype") back into { gen, tier }.
+ * Returns null if the formatId doesn't match the expected pattern.
+ */
+export function parseFormatId(formatId) {
+  if (!formatId) return null;
+  const match = formatId.match(/^gen(\d+)(.+)$/);
+  if (!match) return null;
+  const gen = parseInt(match[1], 10);
+  const tier = match[2];
+  // Validate the tier exists
+  if (!TIERS.find(t => t.id === tier)) return null;
+  return { gen, tier };
+}
+
 // Map our internal tier IDs to Smogon dex URL slugs
 const DEX_TIER_SLUGS = {
   ou: 'ou',

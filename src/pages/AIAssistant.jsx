@@ -25,6 +25,8 @@ export default function AIAssistant() {
   // Use the team's stored format if available, otherwise fall back to global format
   const teamFormatId = currentTeam.formatId || globalFormatId;
   const formatId = teamFormatId;
+  const effectiveMonth = currentTeam.format?.month || format.month;
+  const effectiveRating = currentTeam.format?.rating || format.rating;
 
   // Load types for team members
   useEffect(() => {
@@ -45,10 +47,10 @@ export default function AIAssistant() {
 
   // Load chaos data for suggestions — use team's format
   useEffect(() => {
-    fetchChaosData(format.month, formatId, format.rating)
+    fetchChaosData(effectiveMonth, formatId, effectiveRating)
       .then(setChaosData)
       .catch(() => {});
-  }, [format.month, formatId, format.rating]);
+  }, [effectiveMonth, formatId, effectiveRating]);
 
   const teamMembers = currentTeam.pokemon
     .filter(p => p.species)
@@ -151,7 +153,7 @@ export default function AIAssistant() {
 
 ${teamExport || 'No team configured yet.'}
 
-Format: gen${format.gen}${format.tier} (${format.month})
+Format: ${formatId} (${effectiveMonth})
 
 Help them with team building, strategy, matchup analysis, and suggestions. Be concise and specific.`;
 
@@ -455,7 +457,7 @@ Help them with team building, strategy, matchup analysis, and suggestions. Be co
         <div className="glass-panel p-5">
           <h3 className="font-semibold text-white mb-4">⚠️ Format Threats</h3>
           <p className="text-xs text-slate-500 mb-4">
-            Top usage Pokémon in {formatId} ({format.month}) that could threaten your team.
+            Top usage Pokémon in {formatId} ({effectiveMonth}) that could threaten your team.
           </p>
           {biggestThreats.length > 0 ? (
             <div className="space-y-2">

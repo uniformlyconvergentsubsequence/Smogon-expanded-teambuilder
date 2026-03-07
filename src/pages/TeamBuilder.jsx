@@ -16,7 +16,7 @@ export default function TeamBuilder() {
     teams, currentTeamIndex, currentTeam,
     setPokemon, clearSlot, setTeamName, addTeam, deleteTeam, selectTeam, importTeam, setTeamFormat
   } = useTeam();
-  const { format, formatId } = useApp();
+  const { format, formatId, setFormat } = useApp();
   const [editingSlot, setEditingSlot] = useState(null);
   const [showExport, setShowExport] = useState(false);
   const [showImport, setShowImport] = useState(false);
@@ -32,12 +32,23 @@ export default function TeamBuilder() {
   const hasTypeData = hasMonotypeTypeData(formatId);
   const [selectedMonoType, setSelectedMonoType] = useState(null);
 
-  // Keep team's stored formatId in sync with the current format
+  // Keep team's stored format in sync with the current format
   useEffect(() => {
     if (formatId && currentTeam.formatId !== formatId) {
-      setTeamFormat(formatId);
+      setTeamFormat(formatId, { gen: format.gen, tier: format.tier, month: format.month, rating: format.rating });
     }
-  }, [formatId, currentTeam.formatId]);
+  }, [formatId, format.gen, format.tier, format.month, format.rating]);
+
+  // When switching teams, restore the team's stored format into AppContext
+  useEffect(() => {
+    if (currentTeam.format) {
+      const tf = currentTeam.format;
+      // Only dispatch if the format actually differs to avoid loops
+      if (tf.gen !== format.gen || tf.tier !== format.tier || tf.month !== format.month || tf.rating !== format.rating) {
+        setFormat(tf);
+      }
+    }
+  }, [currentTeamIndex]);
 
   // Reset monotype selection when format changes
   useEffect(() => {
@@ -192,7 +203,16 @@ export default function TeamBuilder() {
                 ? 'bg-blue-600 text-white'
                 : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'}`}
           >
-            {team.name}
+            <div className="flex flex-col items-start">
+              <span>{team.name}</span>
+              {team.formatId && (
+                <span className={`text-[10px] font-normal leading-tight ${
+                  i === currentTeamIndex ? 'text-blue-200' : 'text-slate-500'
+                }`}>
+                  {team.formatId}
+                </span>
+              )}
+            </div>
             {teams.length > 1 && i === currentTeamIndex && (
               <button
                 onClick={e => { e.stopPropagation(); deleteTeam(i); }}
@@ -205,7 +225,7 @@ export default function TeamBuilder() {
           </button>
         ))}
         <button
-          onClick={() => addTeam(undefined, formatId)}
+          onClick={() => addTeam(undefined, formatId, { gen: format.gen, tier: format.tier, month: format.month, rating: format.rating })}
           className="px-3 py-1.5 rounded-lg text-sm text-slate-500 hover:text-white hover:bg-slate-800 transition-all"
         >
           + New
