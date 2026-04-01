@@ -404,9 +404,13 @@ function PokemonEditorModal({ slot, slotIndex, chaosData, format, formatId, onSa
   // Auto-set 0 Atk IVs when using a -Atk nature and no physical moves
   // (reduces Foul Play / confusion damage)
   const MINUS_ATK_NATURES = ['Bold', 'Calm', 'Modest', 'Timid'];
+  // Auto-set 0 Spe IVs when using a -Spe nature and 0 Spe EVs
+  // (for Trick Room teams or slow pivots that want to move last)
+  const MINUS_SPE_NATURES = ['Brave', 'Quiet', 'Relaxed', 'Sassy'];
   useEffect(() => {
     if (!pokemon.species || !pokemon.nature) return;
     const isMinusAtk = MINUS_ATK_NATURES.includes(pokemon.nature);
+    const isMinusSpe = MINUS_SPE_NATURES.includes(pokemon.nature);
     const filledMoves = pokemon.moves.filter(m => m);
     if (filledMoves.length === 0) return; // don't change until moves are set
 
@@ -418,18 +422,36 @@ function PokemonEditorModal({ slot, slotIndex, chaosData, format, formatId, onSa
       });
 
       setPokemonState(prev => {
-        const shouldBeZero = isMinusAtk && !hasPhysical;
-        const currentAtk = prev.ivs?.atk ?? 31;
-        // Only update if the value actually needs to change
-        if (shouldBeZero && currentAtk !== 0) {
-          return { ...prev, ivs: { ...prev.ivs, atk: 0 } };
-        } else if (!shouldBeZero && currentAtk === 0) {
-          return { ...prev, ivs: { ...prev.ivs, atk: 31 } };
+        let newIvs = { ...prev.ivs };
+        let changed = false;
+
+        // 0 Atk IVs: -Atk nature + no physical moves
+        const shouldAtkBeZero = isMinusAtk && !hasPhysical;
+        const currentAtk = newIvs.atk ?? 31;
+        if (shouldAtkBeZero && currentAtk !== 0) {
+          newIvs.atk = 0;
+          changed = true;
+        } else if (!shouldAtkBeZero && currentAtk === 0) {
+          newIvs.atk = 31;
+          changed = true;
         }
-        return prev;
+
+        // 0 Spe IVs: -Spe nature + 0 Spe EVs
+        const hasSpeEvs = (prev.evs?.spe ?? 0) > 0;
+        const shouldSpeBeZero = isMinusSpe && !hasSpeEvs;
+        const currentSpe = newIvs.spe ?? 31;
+        if (shouldSpeBeZero && currentSpe !== 0) {
+          newIvs.spe = 0;
+          changed = true;
+        } else if (!shouldSpeBeZero && currentSpe === 0) {
+          newIvs.spe = 31;
+          changed = true;
+        }
+
+        return changed ? { ...prev, ivs: newIvs } : prev;
       });
     });
-  }, [pokemon.nature, pokemon.moves, pokemon.species]);
+  }, [pokemon.nature, pokemon.moves, pokemon.species, pokemon.evs?.spe]);
 
   // Compute sorted stats lists — use sum of values as denominator (handles weighted data correctly)
   const popularMoves = useMemo(() => {

@@ -2,7 +2,7 @@
 
 A comprehensive competitive Pokémon teambuilder powered by Smogon usage statistics. Build teams, explore stats across every format and generation, and get AI-powered analysis — all in one clean, fast-loading interface.
 
-**Live Site:** [GitHub Pages](https://yourusername.github.io/Smogon-expanded-teambuilder/)
+**Live Site:** [GitHub Pages](https://uniformlyconvergentsubsequence.github.io/Smogon-expanded-teambuilder/)
 
 ## Features
 
