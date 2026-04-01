@@ -60,12 +60,21 @@ export const STAT_CATEGORIES = [
   { id: 'chaos', name: 'Detailed (JSON)', path: 'chaos', description: 'Full detailed data' },
 ];
 
-// Generate available months dynamically
+// Generate available months dynamically (from current month back ~12 months)
 export function getAvailableMonths() {
-  return [
-    { id: '2026-02', name: 'February 2026' },
-    { id: '2026-01', name: 'January 2026' },
-  ];
+  const months = [];
+  const now = new Date();
+  // Stats for month X are typically available by month X+1
+  // Start from the previous month (latest stats likely available)
+  const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  for (let i = 0; i < 12; i++) {
+    const d = new Date(start.getFullYear(), start.getMonth() - i, 1);
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const name = d.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+    months.push({ id: `${yyyy}-${mm}`, name });
+  }
+  return months;
 }
 
 export const NATURES = [

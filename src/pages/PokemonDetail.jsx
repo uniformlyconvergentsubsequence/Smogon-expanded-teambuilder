@@ -326,7 +326,9 @@ export default function PokemonDetail() {
             {/* Teammates */}
             {(activeSection === 'overview' || activeSection === 'teammates') && pokemonInfo.Teammates && (() => {
               const tmEntries = sortByValue(pokemonInfo.Teammates);
-              const tmSum = tmEntries.reduce((s, [, v]) => s + Math.abs(v), 0) || 1;
+              // Use weighted count (sum of Abilities) as denominator for differential teammate values
+              const abilityValues = Object.values(pokemonInfo.Abilities || {});
+              const tmSum = abilityValues.reduce((s, v) => s + v, 0) || 1;
               return (
               <div className="glass-panel p-5">
                 <h3 className="font-semibold text-white mb-4 text-sm">🤝 Common Teammates</h3>

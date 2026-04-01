@@ -482,12 +482,12 @@ function PokemonEditorModal({ slot, slotIndex, chaosData, format, formatId, onSa
   const popularTeammates = useMemo(() => {
     if (!pokemonChaos?.Teammates) return [];
     const entries = sortByValue(pokemonChaos.Teammates);
-    // Use Raw count as denominator — each value is how many times that teammate
-    // appeared alongside this Pokemon, so dividing by raw count gives the true
-    // "% of this Pokemon's teams that also had teammate X".
-    const denom = pokemonChaos['Raw count'] || entries.reduce((s, [, v]) => s + v, 0) || 1;
+    // Teammate values in chaos data are differentials (weighted co-occurrence minus expected).
+    // The correct denominator is the Pokemon's weighted count = sum of Ability values.
+    const abilityEntries = Object.values(pokemonChaos.Abilities || {});
+    const weightedCount = abilityEntries.reduce((s, v) => s + v, 0) || 1;
     return entries.map(([name, val]) => ({
-      name, pct: (val / denom) * 100,
+      name, pct: (val / weightedCount) * 100,
     }));
   }, [pokemonChaos]);
 

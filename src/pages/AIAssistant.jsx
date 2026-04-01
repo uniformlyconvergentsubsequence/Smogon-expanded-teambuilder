@@ -120,14 +120,15 @@ export default function AIAssistant() {
       const pData = getPokemonFromChaos(chaosData, member.species);
       if (!pData || !pData.Teammates) continue;
 
-      // Use Raw count as denominator to get true percentage
-      const rawCount = pData['Raw count'] || 1;
+      // Use weighted count (sum of Abilities) as denominator — teammate values are differentials
+      const abilityValues = Object.values(pData.Abilities || {});
+      const weightedCount = abilityValues.reduce((s, v) => s + v, 0) || 1;
 
       for (const [name, value] of Object.entries(pData.Teammates)) {
         if (teamMembers.some(m => m.species === name)) continue; // skip already on team
         if (!allTeammates[name]) allTeammates[name] = { totalPct: 0, fromPokemon: [] };
-        // Convert raw count to percentage: value/rawCount = fraction of this mon's teams with that teammate
-        allTeammates[name].totalPct += (value / rawCount) * 100;
+        // Convert to differential percentage using weighted count
+        allTeammates[name].totalPct += (value / weightedCount) * 100;
         allTeammates[name].fromPokemon.push(member.species);
       }
     }
