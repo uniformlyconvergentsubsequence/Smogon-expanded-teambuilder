@@ -278,9 +278,16 @@ export default function TeamBuilder() {
         <SuggestPartnersPanel chaosData={chaosData} teamMembers={teamMembers} formatId={formatId} />
       )}
 
-      {/* Type Analysis */}
+      {/* Type Analysis & Role Checklist */}
       {showAnalysis && teamMembers.length >= 1 && (
-        <TypeAnalysisPanel teamMembers={teamMembers} />
+        <div className="space-y-6">
+          <TeamChecklistPanel
+            pokemon={currentTeam.pokemon}
+            teamMembers={teamMembers}
+            teamTypes={teamTypes}
+          />
+          <TypeAnalysisPanel teamMembers={teamMembers} />
+        </div>
       )}
 
       {/* Pokemon Editor Modal */}
@@ -1217,6 +1224,360 @@ function SuggestPartnersPanel({ chaosData, teamMembers, formatId }) {
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+// ===================== Team Role Checklist =====================
+function TeamChecklistPanel({ pokemon, teamMembers, teamTypes }) {
+  const [moveData, setMoveData] = useState(null);
+
+  useEffect(() => {
+    fetchMoves().then(setMoveData).catch(() => {});
+  }, []);
+
+  const checks = useMemo(() => {
+    if (!moveData || teamMembers.length === 0) return [];
+
+    const filledSlots = pokemon.filter(p => p.species);
+    const getMoveId = (name) => name.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const getMove = (name) => moveData[getMoveId(name)] || null;
+    const getTypes = (species) => teamTypes[species] || [];
+    const results = [];
+
+    // 1. Priority
+    const PRIORITY_MOVE_IDS = new Set([
+      'extremespeed', 'aquajet', 'bulletpunch', 'iceshard',
+      'machpunch', 'shadowsneak', 'suckerpunch', 'accelerock',
+      'grassyglide', 'jetpunch', 'quickattack', 'fakeout',
+      'firstimpression', 'watershuriken'
+    ]);
+    const priorityUsers = filledSlots.filter(p =>
+      p.moves.some(m => m && PRIORITY_MOVE_IDS.has(getMoveId(m)))
+    );
+    results.push({
+      name: 'Priority', icon: '⚡',
+      status: priorityUsers.length > 0 ? 'pass' : 'fail',
+      providers: priorityUsers.map(p => p.species),
+      detail: priorityUsers.length > 0 ? null : 'No priority moves on the team',
+    });
+
+    // 2. Fast Pokemon
+    const SPEED_NATURES = ['Jolly', 'Timid', 'Hasty', 'Naive'];
+    const SPEED_ABILITIES = new Set([
+      'speed boost', 'swift swim', 'chlorophyll', 'sand rush',
+      'slush rush', 'unburden', 'protosynthesis', 'quark drive'
+    ]);
+    const fastUsers = filledSlots.filter(p => {
+      const hasScarf = p.item && p.item.toLowerCase() === 'choice scarf';
+      const hasSpeedNature = SPEED_NATURES.includes(p.nature);
+      const hasMaxSpeed = (p.evs?.spe ?? 0) >= 252;
+      const hasSpeedAbility = p.ability && SPEED_ABILITIES.has(p.ability.toLowerCase());
+      return hasScarf || (hasSpeedNature && hasMaxSpeed) || hasSpeedAbility;
+    });
+    results.push({
+      name: 'Fast Pokemon', icon: '💨',
+      status: fastUsers.length > 0 ? 'pass' : 'warn',
+      providers: fastUsers.map(p => p.species),
+      detail: fastUsers.length > 0 ? null : 'No obviously fast Pokemon (Scarf, max Spe EVs + nature, or Speed ability)',
+    });
+
+    // 3. Hazards
+    const HAZARD_MOVE_IDS = new Set([
+      'stealthrock', 'spikes', 'toxicspikes', 'stickyweb',
+      'ceaselessedge', 'stoneaxe'
+    ]);
+    const hazardUsers = filledSlots.filter(p =>
+      p.moves.some(m => m && HAZARD_MOVE_IDS.has(getMoveId(m)))
+    );
+    results.push({
+      name: 'Hazards', icon: '🪨',
+      status: hazardUsers.length > 0 ? 'pass' : 'fail',
+      providers: hazardUsers.map(p => p.species),
+      detail: hazardUsers.length > 0 ? null : 'No entry hazard moves',
+    });
+
+    // 4. Hazard Control
+    const HAZARD_REMOVAL_IDS = new Set([
+      'rapidspin', 'defog', 'courtchange', 'tidyup', 'mortalspin'
+    ]);
+    const hazardControlUsers = filledSlots.filter(p =>
+      p.moves.some(m => m && HAZARD_REMOVAL_IDS.has(getMoveId(m)))
+    );
+    results.push({
+      name: 'Hazard Control', icon: '🧹',
+      status: hazardControlUsers.length > 0 ? 'pass' : 'fail',
+      providers: hazardControlUsers.map(p => p.species),
+      detail: hazardControlUsers.length > 0 ? null : 'No hazard removal (Defog, Rapid Spin, etc.)',
+    });
+
+    // 5. Toxic Spike Absorber
+    const toxicAbsorbers = filledSlots.filter(p => {
+      const types = getTypes(p.species);
+      return types.some(t => t === 'Poison');
+    });
+    results.push({
+      name: 'Toxic Spike Absorber', icon: '☠️',
+      status: toxicAbsorbers.length > 0 ? 'pass' : 'warn',
+      providers: toxicAbsorbers.map(p => p.species),
+      detail: toxicAbsorbers.length > 0 ? null : 'No Poison-type to absorb Toxic Spikes on switch-in',
+    });
+
+    // 6. Status Immunity
+    const STATUS_IMMUNE_ABILITIES = new Set([
+      'natural cure', 'magic guard', 'magic bounce', 'overcoat',
+      'immunity', 'insomnia', 'vital spirit', 'limber',
+      'water veil', 'water bubble', 'magma armor', 'comatose',
+      'purifying salt', 'thermal exchange', 'shields down',
+      'good as gold'
+    ]);
+    const statusImmuneUsers = filledSlots.filter(p => {
+      if (p.ability && STATUS_IMMUNE_ABILITIES.has(p.ability.toLowerCase())) return true;
+      const types = getTypes(p.species);
+      return types.some(t => ['Electric', 'Steel', 'Poison', 'Fire'].includes(t));
+    });
+    results.push({
+      name: 'Status Immunity', icon: '🛡️',
+      status: statusImmuneUsers.length >= 2 ? 'pass' : statusImmuneUsers.length >= 1 ? 'warn' : 'fail',
+      providers: statusImmuneUsers.map(p => p.species),
+      detail: statusImmuneUsers.length >= 2 ? null : 'Few Pokemon with status immunities (type-based or ability-based)',
+    });
+
+    // 7. Resistance to All Types
+    const weaknesses = getTeamWeaknesses(teamMembers);
+    const uncoveredTypes = weaknesses.filter(w => w.resistCount === 0 && w.weakCount > 0);
+    results.push({
+      name: 'All Types Resisted', icon: '🔰',
+      status: uncoveredTypes.length === 0 ? 'pass' : uncoveredTypes.length <= 2 ? 'warn' : 'fail',
+      providers: uncoveredTypes.length === 0 ? ['Full coverage'] : [],
+      detail: uncoveredTypes.length > 0
+        ? `Unresisted: ${uncoveredTypes.map(t => t.type).join(', ')}`
+        : null,
+    });
+
+    // 8. Steel Type
+    const steelUsers = filledSlots.filter(p => {
+      const types = getTypes(p.species);
+      return types.some(t => t === 'Steel');
+    });
+    results.push({
+      name: 'Steel Type', icon: '⚙️',
+      status: steelUsers.length > 0 ? 'pass' : 'warn',
+      providers: steelUsers.map(p => p.species),
+      detail: steelUsers.length > 0 ? null : 'No Steel-type (valuable Fairy/Ice/Rock resistances)',
+    });
+
+    // 9. Ground Immunity
+    const groundImmuneUsers = filledSlots.filter(p => {
+      const types = getTypes(p.species);
+      const isFlying = types.some(t => t === 'Flying');
+      const hasLevitate = p.ability && p.ability.toLowerCase() === 'levitate';
+      const hasAirBalloon = p.item && p.item.toLowerCase() === 'air balloon';
+      return isFlying || hasLevitate || hasAirBalloon;
+    });
+    results.push({
+      name: 'Ground Immunity', icon: '🕊️',
+      status: groundImmuneUsers.length > 0 ? 'pass' : 'fail',
+      providers: groundImmuneUsers.map(p => p.species),
+      detail: groundImmuneUsers.length > 0 ? null : 'No Ground immunity (Flying, Levitate, Air Balloon)',
+    });
+
+    // 10. Electric Immunity
+    const ELEC_IMMUNE_ABILITIES = new Set(['lightning rod', 'volt absorb', 'motor drive']);
+    const elecImmuneUsers = filledSlots.filter(p => {
+      const types = getTypes(p.species);
+      const isGround = types.some(t => t === 'Ground');
+      const hasAbility = p.ability && ELEC_IMMUNE_ABILITIES.has(p.ability.toLowerCase());
+      return isGround || hasAbility;
+    });
+    results.push({
+      name: 'Electric Immunity', icon: '🔌',
+      status: elecImmuneUsers.length > 0 ? 'pass' : 'warn',
+      providers: elecImmuneUsers.map(p => p.species),
+      detail: elecImmuneUsers.length > 0 ? null : 'No Electric immunity (Ground type, Volt Absorb, Lightning Rod, Motor Drive)',
+    });
+
+    // 11. Pivoting Moves
+    const PIVOT_MOVE_IDS = new Set([
+      'uturn', 'voltswitch', 'flipturn', 'teleport',
+      'partingshot', 'batonpass', 'chillyreception', 'shedtail'
+    ]);
+    const pivotUsers = filledSlots.filter(p =>
+      p.moves.some(m => m && PIVOT_MOVE_IDS.has(getMoveId(m)))
+    );
+    results.push({
+      name: 'Pivoting Moves', icon: '🔄',
+      status: pivotUsers.length > 0 ? 'pass' : 'warn',
+      providers: pivotUsers.map(p => p.species),
+      detail: pivotUsers.length > 0 ? null : 'No pivoting moves (U-turn, Volt Switch, Flip Turn, Teleport, etc.)',
+    });
+
+    // 12. Knock Off User
+    const knockOffUsers = filledSlots.filter(p =>
+      p.moves.some(m => m && getMoveId(m) === 'knockoff')
+    );
+    results.push({
+      name: 'Knock Off User', icon: '✋',
+      status: knockOffUsers.length > 0 ? 'pass' : 'warn',
+      providers: knockOffUsers.map(p => p.species),
+      detail: knockOffUsers.length > 0 ? null : 'No Knock Off users for item removal',
+    });
+
+    // 13. Knock Off Absorber (Dark resists: Fighting, Dark, Fairy)
+    const knockAbsorbers = filledSlots.filter(p => {
+      const types = getTypes(p.species);
+      return types.some(t => ['Fighting', 'Dark', 'Fairy'].includes(t));
+    });
+    results.push({
+      name: 'Knock Off Absorber', icon: '🧤',
+      status: knockAbsorbers.length > 0 ? 'pass' : 'warn',
+      providers: knockAbsorbers.map(p => p.species),
+      detail: knockAbsorbers.length > 0 ? null : 'No Dark resists (Fighting, Dark, Fairy) to absorb Knock Off',
+    });
+
+    // 14. Contact Punisher
+    const CONTACT_PUNISH_ABILITIES = new Set([
+      'iron barbs', 'rough skin', 'flame body', 'static',
+      'effect spore', 'poison point', 'gooey', 'tangling hair',
+      'wandering spirit'
+    ]);
+    const contactPunishers = filledSlots.filter(p => {
+      const hasHelmet = p.item && p.item.toLowerCase() === 'rocky helmet';
+      const hasAbility = p.ability && CONTACT_PUNISH_ABILITIES.has(p.ability.toLowerCase());
+      return hasHelmet || hasAbility;
+    });
+    results.push({
+      name: 'Contact Punisher', icon: '🦔',
+      status: contactPunishers.length > 0 ? 'pass' : 'warn',
+      providers: contactPunishers.map(p => p.species),
+      detail: contactPunishers.length > 0 ? null : 'No contact punisher (Rocky Helmet, Iron Barbs, Rough Skin, etc.)',
+    });
+
+    // 15. Immediate Power
+    const POWER_ITEMS = new Set(['choice band', 'choice specs', 'life orb']);
+    const powerUsers = filledSlots.filter(p =>
+      p.item && POWER_ITEMS.has(p.item.toLowerCase())
+    );
+    results.push({
+      name: 'Immediate Power', icon: '💥',
+      status: powerUsers.length > 0 ? 'pass' : 'warn',
+      providers: powerUsers.map(p => p.species),
+      detail: powerUsers.length > 0 ? null : 'No immediate power (Choice Band, Choice Specs, Life Orb)',
+    });
+
+    // 16. Breaking Core (boosting moves or multiple offensive threats)
+    const BOOST_MOVE_IDS = new Set([
+      'swordsdance', 'nastyplot', 'calmmind', 'dragondance',
+      'quiverdance', 'shellsmash', 'bellydrum', 'bulkup',
+      'irondefense body press combo', 'tailglow', 'growth',
+      'shiftgear', 'coil', 'curse', 'agility', 'autotomize',
+      'tidyup', 'victorydance', 'filletaway', 'noretreat',
+      'clangoroussoul'
+    ]);
+    const breakers = filledSlots.filter(p => {
+      const hasBoost = p.moves.some(m => m && BOOST_MOVE_IDS.has(getMoveId(m)));
+      const hasPowerItem = p.item && POWER_ITEMS.has(p.item.toLowerCase());
+      return hasBoost || hasPowerItem;
+    });
+    results.push({
+      name: 'Breaking Core', icon: '🔨',
+      status: breakers.length >= 2 ? 'pass' : breakers.length >= 1 ? 'warn' : 'fail',
+      providers: breakers.map(p => p.species),
+      detail: breakers.length >= 2 ? null : 'Need 2+ wallbreakers (boosting moves or Choice/LO items)',
+    });
+
+    // 17. Physical & Special Attackers
+    const physicalAttackers = filledSlots.filter(p =>
+      p.moves.some(m => {
+        if (!m) return false;
+        const move = getMove(m);
+        return move && move.category === 'Physical' && (move.basePower || 0) > 0;
+      })
+    );
+    const specialAttackers = filledSlots.filter(p =>
+      p.moves.some(m => {
+        if (!m) return false;
+        const move = getMove(m);
+        return move && move.category === 'Special' && (move.basePower || 0) > 0;
+      })
+    );
+    const hasPhysical = physicalAttackers.length > 0;
+    const hasSpecial = specialAttackers.length > 0;
+    results.push({
+      name: 'Physical & Special', icon: '⚔️',
+      status: hasPhysical && hasSpecial ? 'pass' : 'fail',
+      providers: [
+        ...physicalAttackers.map(p => `${p.species} (Phys)`),
+        ...specialAttackers.map(p => `${p.species} (Spec)`),
+      ],
+      detail: !hasPhysical ? 'No physical attackers' : !hasSpecial ? 'No special attackers' : null,
+    });
+
+    return results;
+  }, [pokemon, teamMembers, teamTypes, moveData]);
+
+  if (teamMembers.length === 0) return null;
+  if (!moveData) {
+    return (
+      <div className="glass-panel p-5">
+        <div className="flex items-center gap-2 text-sm text-slate-500">
+          <div className="w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+          Loading move data for checklist...
+        </div>
+      </div>
+    );
+  }
+
+  const passCount = checks.filter(c => c.status === 'pass').length;
+  const totalCount = checks.length;
+
+  return (
+    <div className="glass-panel p-5 animate-fade-in">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="font-semibold text-white text-sm">📋 Team Role Checklist</h3>
+        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+          passCount >= totalCount - 2 ? 'bg-emerald-500/20 text-emerald-400' :
+          passCount >= totalCount / 2 ? 'bg-amber-500/20 text-amber-400' :
+          'bg-red-500/20 text-red-400'
+        }`}>
+          {passCount}/{totalCount}
+        </span>
+      </div>
+      <div className="space-y-1">
+        {checks.map(check => (
+          <div key={check.name} className={`flex items-start gap-2.5 px-3 py-2 rounded-lg text-sm ${
+            check.status === 'pass' ? 'bg-emerald-900/10' :
+            check.status === 'warn' ? 'bg-amber-900/10' :
+            'bg-red-900/10'
+          }`}>
+            <span className="flex-shrink-0 w-5 text-center mt-0.5">
+              {check.status === 'pass' ? '✅' : check.status === 'warn' ? '⚠️' : '❌'}
+            </span>
+            <div className="flex-1 min-w-0">
+              <span className={`font-medium ${
+                check.status === 'pass' ? 'text-emerald-300' :
+                check.status === 'warn' ? 'text-amber-300' :
+                'text-red-300'
+              }`}>
+                {check.icon} {check.name}
+              </span>
+              {check.providers.length > 0 && check.status === 'pass' && (
+                <p className="text-xs text-slate-500 mt-0.5 truncate">
+                  {check.providers.join(', ')}
+                </p>
+              )}
+              {check.detail && (
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {check.detail}
+                </p>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+      <p className="text-xs text-slate-600 mt-3">
+        ✅ covered · ⚠️ nice to have · ❌ important, missing
+      </p>
     </div>
   );
 }
