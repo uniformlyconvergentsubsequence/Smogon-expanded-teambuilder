@@ -1245,41 +1245,50 @@ function TeamChecklistPanel({ pokemon, teamMembers, teamTypes }) {
     const getTypes = (species) => teamTypes[species] || [];
     const results = [];
 
-    // 1. Priority
-    const PRIORITY_MOVE_IDS = new Set([
+    // 1. Priority (reliable vs conditional)
+    const RELIABLE_PRIORITY_IDS = new Set([
       'extremespeed', 'aquajet', 'bulletpunch', 'iceshard',
-      'machpunch', 'shadowsneak', 'suckerpunch', 'accelerock',
-      'grassyglide', 'jetpunch', 'quickattack', 'fakeout',
+      'machpunch', 'shadowsneak', 'accelerock',
+      'grassyglide', 'jetpunch', 'quickattack',
       'firstimpression', 'watershuriken'
     ]);
-    const priorityUsers = filledSlots.filter(p =>
-      p.moves.some(m => m && PRIORITY_MOVE_IDS.has(getMoveId(m)))
+    const CONDITIONAL_PRIORITY_IDS = new Set([
+      'suckerpunch', 'thunderclap', 'fakeout'
+    ]);
+    const reliablePriorityUsers = filledSlots.filter(p =>
+      p.moves.some(m => m && RELIABLE_PRIORITY_IDS.has(getMoveId(m)))
     );
+    const conditionalPriorityUsers = filledSlots.filter(p =>
+      !p.moves.some(m => m && RELIABLE_PRIORITY_IDS.has(getMoveId(m))) &&
+      p.moves.some(m => m && CONDITIONAL_PRIORITY_IDS.has(getMoveId(m)))
+    );
+    const allPriorityUsers = [...reliablePriorityUsers, ...conditionalPriorityUsers];
+    const priorityStatus = reliablePriorityUsers.length > 0 ? 'pass'
+      : conditionalPriorityUsers.length > 0 ? 'warn' : 'fail';
     results.push({
       name: 'Priority', icon: '⚡',
-      status: priorityUsers.length > 0 ? 'pass' : 'fail',
-      providers: priorityUsers.map(p => p.species),
-      detail: priorityUsers.length > 0 ? null : 'No priority moves on the team',
+      status: priorityStatus,
+      providers: allPriorityUsers.map(p => p.species),
+      detail: priorityStatus === 'pass' ? null
+        : priorityStatus === 'warn' ? 'Only conditional priority (Sucker Punch, Thunderclap, Fake Out) — can be played around'
+        : 'No priority moves on the team',
     });
 
-    // 2. Fast Pokemon
-    const SPEED_NATURES = ['Jolly', 'Timid', 'Hasty', 'Naive'];
+    // 2. Fast Pokemon (Scarf or speed-boosting ability only)
     const SPEED_ABILITIES = new Set([
       'speed boost', 'swift swim', 'chlorophyll', 'sand rush',
       'slush rush', 'unburden', 'protosynthesis', 'quark drive'
     ]);
     const fastUsers = filledSlots.filter(p => {
       const hasScarf = p.item && p.item.toLowerCase() === 'choice scarf';
-      const hasSpeedNature = SPEED_NATURES.includes(p.nature);
-      const hasMaxSpeed = (p.evs?.spe ?? 0) >= 252;
       const hasSpeedAbility = p.ability && SPEED_ABILITIES.has(p.ability.toLowerCase());
-      return hasScarf || (hasSpeedNature && hasMaxSpeed) || hasSpeedAbility;
+      return hasScarf || hasSpeedAbility;
     });
     results.push({
       name: 'Fast Pokemon', icon: '💨',
       status: fastUsers.length > 0 ? 'pass' : 'warn',
       providers: fastUsers.map(p => p.species),
-      detail: fastUsers.length > 0 ? null : 'No obviously fast Pokemon (Scarf, max Spe EVs + nature, or Speed ability)',
+      detail: fastUsers.length > 0 ? null : 'No speed control (Choice Scarf or speed-boosting ability)',
     });
 
     // 3. Hazards
@@ -1297,18 +1306,29 @@ function TeamChecklistPanel({ pokemon, teamMembers, teamTypes }) {
       detail: hazardUsers.length > 0 ? null : 'No entry hazard moves',
     });
 
-    // 4. Hazard Control
+    // 4. Hazard Control (moves + Magic Bounce)
     const HAZARD_REMOVAL_IDS = new Set([
       'rapidspin', 'defog', 'courtchange', 'tidyup', 'mortalspin'
     ]);
-    const hazardControlUsers = filledSlots.filter(p =>
+    const hazardControlMoveUsers = filledSlots.filter(p =>
       p.moves.some(m => m && HAZARD_REMOVAL_IDS.has(getMoveId(m)))
     );
+    const magicBouncers = filledSlots.filter(p =>
+      p.ability && p.ability.toLowerCase() === 'magic bounce'
+    );
+    const allHazardControllers = [
+      ...hazardControlMoveUsers,
+      ...magicBouncers.filter(mb => !hazardControlMoveUsers.some(u => u.species === mb.species))
+    ];
+    const hazardControlStatus = hazardControlMoveUsers.length > 0 ? 'pass'
+      : magicBouncers.length > 0 ? 'warn' : 'fail';
     results.push({
       name: 'Hazard Control', icon: '🧹',
-      status: hazardControlUsers.length > 0 ? 'pass' : 'fail',
-      providers: hazardControlUsers.map(p => p.species),
-      detail: hazardControlUsers.length > 0 ? null : 'No hazard removal (Defog, Rapid Spin, etc.)',
+      status: hazardControlStatus,
+      providers: allHazardControllers.map(p => p.species),
+      detail: hazardControlStatus === 'pass' ? null
+        : hazardControlStatus === 'warn' ? 'Only Magic Bounce for hazard control — cannot remove existing hazards'
+        : 'No hazard removal (Defog, Rapid Spin, Court Change, etc.) or Magic Bounce',
     });
 
     // 5. Toxic Spike Absorber
