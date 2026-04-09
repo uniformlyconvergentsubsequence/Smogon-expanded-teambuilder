@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useTeam } from '../context/TeamContext';
 import { useApp } from '../context/AppContext';
 import { exportTeamToShowdown, importTeamFromShowdown, createEmptyPokemon, createEmptyTeam } from '../utils/exportShowdown';
@@ -391,12 +391,30 @@ function PokemonEditorModal({ slot, slotIndex, chaosData, format, formatId, onSa
     return getUsageListFromChaos(chaosData);
   }, [chaosData]);
 
-  // Filter by search
+  // Filter by search (no hard cap — progressive loading handles display)
   const filteredPokemon = useMemo(() => {
-    if (!searchQuery) return usageList.slice(0, 60);
+    if (!searchQuery) return usageList;
     const q = searchQuery.toLowerCase();
-    return usageList.filter(p => p.name.toLowerCase().includes(q)).slice(0, 60);
+    return usageList.filter(p => p.name.toLowerCase().includes(q));
   }, [usageList, searchQuery]);
+
+  // Progressive loading: start with 60, load more on scroll
+  const [visibleCount, setVisibleCount] = useState(60);
+  const listRef = useRef(null);
+
+  // Reset visible count when search or data changes
+  useEffect(() => {
+    setVisibleCount(60);
+  }, [searchQuery, chaosData]);
+
+  const handleListScroll = useCallback((e) => {
+    const el = e.target;
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 100) {
+      setVisibleCount(prev => Math.min(prev + 40, filteredPokemon.length));
+    }
+  }, [filteredPokemon.length]);
+
+  const displayedPokemon = filteredPokemon.slice(0, visibleCount);
 
   // Load chaos data for selected pokemon
   useEffect(() => {
@@ -671,8 +689,8 @@ function PokemonEditorModal({ slot, slotIndex, chaosData, format, formatId, onSa
                 <span className="ml-2 text-slate-600">·</span>
                 <span className="ml-2 text-blue-400/70">Shift+Enter = auto-fill top set</span>
               </div>
-              <div className="space-y-0.5 max-h-[50vh] overflow-y-auto">
-                {filteredPokemon.map((p, i) => (
+              <div ref={listRef} onScroll={handleListScroll} className="space-y-0.5 max-h-[50vh] overflow-y-auto">
+                {displayedPokemon.map((p, i) => (
                   <PokemonPickerRow
                     key={p.name}
                     pokemon={p}
@@ -681,6 +699,11 @@ function PokemonEditorModal({ slot, slotIndex, chaosData, format, formatId, onSa
                     onClick={() => selectPokemon(p.name)}
                   />
                 ))}
+                {visibleCount < filteredPokemon.length && (
+                  <p className="text-xs text-slate-500 py-2 text-center">
+                    Showing {visibleCount} of {filteredPokemon.length} · scroll for more
+                  </p>
+                )}
                 {filteredPokemon.length === 0 && (
                   <p className="text-sm text-slate-500 py-4 text-center">
                     No Pokémon found.
