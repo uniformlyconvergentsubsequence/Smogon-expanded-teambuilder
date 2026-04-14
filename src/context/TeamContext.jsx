@@ -140,6 +140,25 @@ function teamReducer(state, action) {
       break;
     }
 
+    case 'COPY_TEAM': {
+      const source = state.teams[state.currentTeamIndex];
+      const copy = {
+        ...source,
+        name: `${source.name} (copy)`,
+        pokemon: source.pokemon.map(p => ({ ...p,
+          evs: { ...p.evs },
+          ivs: { ...p.ivs },
+          moves: [...p.moves],
+        })),
+      };
+      newState = {
+        ...state,
+        teams: [...state.teams, copy],
+        currentTeamIndex: state.teams.length,
+      };
+      break;
+    }
+
     default:
       return state;
   }
@@ -182,6 +201,8 @@ export function TeamProvider({ children }) {
     },
     deleteTeam: (index) =>
       dispatch({ type: 'DELETE_TEAM', index }),
+    copyTeam: () =>
+      dispatch({ type: 'COPY_TEAM' }),
     selectTeam: (index) =>
       dispatch({ type: 'SELECT_TEAM', index }),
     importTeam: (pokemon) =>

@@ -14,7 +14,7 @@ import { getEffectivenessClass, getEffectivenessLabel, sortByValue, parseSpread 
 export default function TeamBuilder() {
   const {
     teams, currentTeamIndex, currentTeam,
-    setPokemon, clearSlot, setTeamName, addTeam, deleteTeam, selectTeam, importTeam, setTeamFormat
+    setPokemon, clearSlot, setTeamName, addTeam, deleteTeam, copyTeam, selectTeam, importTeam, setTeamFormat
   } = useTeam();
   const { format, formatId, setFormat } = useApp();
   const [editingSlot, setEditingSlot] = useState(null);
@@ -213,14 +213,25 @@ export default function TeamBuilder() {
                 </span>
               )}
             </div>
-            {teams.length > 1 && i === currentTeamIndex && (
-              <button
-                onClick={e => { e.stopPropagation(); deleteTeam(i); }}
-                className="ml-1 text-white/50 hover:text-white/90"
-                title="Delete team"
-              >
-                ×
-              </button>
+            {i === currentTeamIndex && (
+              <span className="flex items-center gap-0.5 ml-1">
+                <button
+                  onClick={e => { e.stopPropagation(); copyTeam(); }}
+                  className="text-white/40 hover:text-white/90 px-0.5"
+                  title="Duplicate team"
+                >
+                  ⧉
+                </button>
+                {teams.length > 1 && (
+                  <button
+                    onClick={e => { e.stopPropagation(); deleteTeam(i); }}
+                    className="text-white/40 hover:text-white/90 px-0.5"
+                    title="Delete team"
+                  >
+                    ×
+                  </button>
+                )}
+              </span>
             )}
           </button>
         ))}
