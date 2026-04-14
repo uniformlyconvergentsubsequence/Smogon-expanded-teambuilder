@@ -3,7 +3,7 @@ import { useTeam } from '../context/TeamContext';
 import { useApp } from '../context/AppContext';
 import { exportTeamToShowdown, importTeamFromShowdown, createEmptyPokemon, createEmptyTeam } from '../utils/exportShowdown';
 import { fetchChaosData, getPokemonFromChaos, getUsageListFromChaos, fetchMonotypeChaosData } from '../services/smogonApi';
-import { getPokemonTypes, formatMoveName, formatItemName, formatAbilityName, formatTypeName, fetchMoves } from '../services/showdownData';
+import { fetchPokedex, getPokemonTypes, formatMoveName, formatItemName, formatAbilityName, formatTypeName, fetchMoves } from '../services/showdownData';
 import { TypeBadgeRow } from '../components/TypeBadge';
 import TypeBadge from '../components/TypeBadge';
 import FormatSelector from '../components/FormatSelector';
@@ -383,7 +383,9 @@ function PokemonEditorModal({ slot, slotIndex, chaosData, format, formatId, onSa
   const [pokemon, setPokemonState] = useState({ ...createEmptyPokemon(), ...slot });
   const [activeTab, setActiveTab] = useState(slot.species ? 'moves' : 'pokemon');
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedTypeFilter, setSelectedTypeFilter] = useState('');
   const [pokemonChaos, setPokemonChaos] = useState(null);
+  const [pokemonTypeMap, setPokemonTypeMap] = useState({});
 
   // Usage-sorted Pokemon list from chaos data
   const usageList = useMemo(() => {
@@ -391,12 +393,56 @@ function PokemonEditorModal({ slot, slotIndex, chaosData, format, formatId, onSa
     return getUsageListFromChaos(chaosData);
   }, [chaosData]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    if (usageList.length === 0) {
+      setPokemonTypeMap({});
+      return () => { cancelled = true; };
+    }
+
+    fetchPokedex()
+      .then(pokedex => {
+        if (cancelled) return;
+
+        const lookup = new Map();
+        Object.entries(pokedex).forEach(([id, data]) => {
+          if (!data?.name) return;
+          lookup.set(id, data);
+          lookup.set(data.name.toLowerCase(), data);
+        });
+
+        const nextTypeMap = {};
+        usageList.forEach(entry => {
+          const normalizedId = entry.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+          const data = lookup.get(normalizedId) || lookup.get(entry.name.toLowerCase());
+          if (data?.types?.length) {
+            nextTypeMap[entry.name] = data.types;
+          }
+        });
+
+        setPokemonTypeMap(nextTypeMap);
+      })
+      .catch(() => {
+        if (!cancelled) setPokemonTypeMap({});
+      });
+
+    return () => { cancelled = true; };
+  }, [usageList]);
+
   // Filter by search (no hard cap — progressive loading handles display)
   const filteredPokemon = useMemo(() => {
-    if (!searchQuery) return usageList;
-    const q = searchQuery.toLowerCase();
-    return usageList.filter(p => p.name.toLowerCase().includes(q));
-  }, [usageList, searchQuery]);
+    const q = searchQuery.trim().toLowerCase();
+
+    return usageList.filter(entry => {
+      const types = pokemonTypeMap[entry.name] || [];
+      const matchesQuery = !q
+        || entry.name.toLowerCase().includes(q)
+        || types.some(type => type.toLowerCase().includes(q));
+      const matchesType = !selectedTypeFilter || types.includes(selectedTypeFilter);
+      return matchesQuery && matchesType;
+    });
+  }, [usageList, searchQuery, selectedTypeFilter, pokemonTypeMap]);
 
   // Progressive loading: start with 60, load more on scroll
   const [visibleCount, setVisibleCount] = useState(60);
@@ -405,7 +451,7 @@ function PokemonEditorModal({ slot, slotIndex, chaosData, format, formatId, onSa
   // Reset visible count when search or data changes
   useEffect(() => {
     setVisibleCount(60);
-  }, [searchQuery, chaosData]);
+  }, [searchQuery, selectedTypeFilter, chaosData]);
 
   const handleListScroll = useCallback((e) => {
     const el = e.target;
@@ -671,14 +717,26 @@ function PokemonEditorModal({ slot, slotIndex, chaosData, format, formatId, onSa
           {/* ========== POKEMON TAB ========== */}
           {activeTab === 'pokemon' && (
             <div>
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                className="input-field mb-3"
-                placeholder="Search Pokémon by name..."
-                autoFocus
-              />
+              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_220px] mb-3">
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  className="input-field"
+                  placeholder="Search Pokemon by name or type..."
+                  autoFocus
+                />
+                <select
+                  value={selectedTypeFilter}
+                  onChange={e => setSelectedTypeFilter(e.target.value)}
+                  className="select-field"
+                >
+                  <option value="">All types</option>
+                  {ALL_TYPES.map(type => (
+                    <option key={type} value={type}>{type}</option>
+                  ))}
+                </select>
+              </div>
               {!chaosData && (
                 <p className="text-sm text-amber-400 mb-3">
                   ⚠️ Stats data not available for this format. Try changing format settings.
@@ -687,6 +745,10 @@ function PokemonEditorModal({ slot, slotIndex, chaosData, format, formatId, onSa
               <div className="text-xs text-slate-500 mb-2">
                 Sorted by usage in {formatId} · {format.month}
                 <span className="ml-2 text-slate-600">·</span>
+                <span className="ml-2">
+                  {selectedTypeFilter ? `Filtered to ${selectedTypeFilter}-types` : 'All types'}
+                </span>
+                <span className="ml-2 text-slate-600">·</span>
                 <span className="ml-2 text-blue-400/70">Shift+Enter = auto-fill top set</span>
               </div>
               <div ref={listRef} onScroll={handleListScroll} className="space-y-0.5 max-h-[50vh] overflow-y-auto">
@@ -694,6 +756,7 @@ function PokemonEditorModal({ slot, slotIndex, chaosData, format, formatId, onSa
                   <PokemonPickerRow
                     key={p.name}
                     pokemon={p}
+                    types={pokemonTypeMap[p.name] || []}
                     rank={p.rank || i + 1}
                     isSelected={pokemon.species === p.name}
                     onClick={() => selectPokemon(p.name)}
@@ -1023,13 +1086,7 @@ function StrategyTab({ pokemon, format, formatId }) {
 
 // ===================== Reusable Sub-Components =====================
 
-function PokemonPickerRow({ pokemon, rank, isSelected, onClick }) {
-  const [types, setTypes] = useState([]);
-
-  useEffect(() => {
-    getPokemonTypes(pokemon.name).then(setTypes).catch(() => {});
-  }, [pokemon.name]);
-
+function PokemonPickerRow({ pokemon, types, rank, isSelected, onClick }) {
   const spriteUrl = `https://play.pokemonshowdown.com/sprites/dex/${pokemon.name.toLowerCase().replace(/[^a-z0-9]/g, '')}.png`;
 
   return (
