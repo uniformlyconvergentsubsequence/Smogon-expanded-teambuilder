@@ -1180,12 +1180,40 @@ function ExportModal({ team, onClose }) {
     });
   }
 
+  function createPokepaste() {
+    if (!exportText.trim()) return;
+
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = 'https://pokepast.es/create';
+    form.target = '_blank';
+
+    const fields = {
+      paste: exportText,
+      title: team?.name || 'Exported Team',
+      author: '',
+      notes: '',
+    };
+
+    Object.entries(fields).forEach(([name, value]) => {
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = name;
+      input.value = value;
+      form.appendChild(input);
+    });
+
+    document.body.appendChild(form);
+    form.submit();
+    document.body.removeChild(form);
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
          onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="glass-panel w-full max-w-xl animate-slide-up">
         <div className="p-4 border-b border-slate-700/50 flex items-center justify-between">
-          <h2 className="font-bold text-white">Export to Showdown</h2>
+          <h2 className="font-bold text-white">Export Team</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-white">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -1193,10 +1221,18 @@ function ExportModal({ team, onClose }) {
           </button>
         </div>
         <div className="p-4">
+          <p className="text-xs text-slate-500 mb-2">Showdown export text (also used for Pokepaste)</p>
           <textarea readOnly value={exportText}
             className="input-field font-mono text-sm h-64 resize-none"
             onClick={e => e.target.select()} />
-          <div className="mt-3 flex justify-end">
+          <div className="mt-3 flex justify-end gap-2">
+            <button
+              onClick={createPokepaste}
+              disabled={!exportText.trim()}
+              className="btn-secondary text-sm disabled:opacity-40"
+            >
+              Create Pokepaste
+            </button>
             <button onClick={copyToClipboard}
               className={`btn-primary text-sm ${copied ? '!bg-emerald-600' : ''}`}>
               {copied ? '✓ Copied!' : 'Copy to Clipboard'}
