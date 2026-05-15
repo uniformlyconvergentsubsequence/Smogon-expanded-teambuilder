@@ -7,17 +7,22 @@
  *   lift(candidate | member) = P(candidate | member) / P(candidate)
  *
  * A lift of 2.0 means the candidate appears twice as often alongside that
- * team member as pure chance would predict.  A lift of 0.8 means it's seen
- * less often than expected — not great synergy.
+ * team member as pure chance would predict.
  *
- * We aggregate per-member lifts with their geometric mean so that a candidate
- * that pairs well with EVERY current member scores higher than one that pairs
- * extremely well with one member but poorly with the rest.
+ * Problem with pure lift in Balanced mode: it heavily biases toward low-usage
+ * Pokemon.  A 0.1%-usage candidate that pairs at 0.5% scores lift 5× while a
+ * 10%-usage candidate that pairs at 20% scores only 2× — even though the latter
+ * pairing is far more real and meaningful.
  *
- * Mode adjustments on top of the geometric mean:
- *   balanced – pure lift, default
- *   spicy    – amplify lift, penalise base popularity → surfaces rare gems
- *   safe     – temper lift with some base-popularity weight → reliable picks
+ * Mode scoring:
+ *   balanced – normalised PMI (nPMI) per member, then geometric mean.
+ *              nPMI = log P(C|T) / log P(C,T) ∈ [-1, 1].  It normalises out
+ *              the low-usage inflation so niche obscure Pokemon no longer
+ *              automatically outrank format staples.
+ *   spicy    – raw lift amplified + base-usage penalty → intentionally surfaces
+ *              rare high-synergy gems (the old Balanced formula).
+ *   safe     – lift × baseUsage^0.35 → synergy-aware but weighted toward
+ *              popular, reliable picks.
  */
 
 import { getPokemonFromChaos } from '../services/smogonApi';
@@ -107,16 +112,29 @@ export function scoreCandidate(candidateName, teamMembers, chaosData, mode = 'ba
   // Mode-specific scoring
   let score;
   if (mode === 'spicy') {
-    // Amplify synergy signal and penalise raw popularity
-    // → rare but highly synergistic picks rise to the top
+    // Amplify raw lift signal and penalise base popularity
+    // → intentionally surfaces rare but highly synergistic picks
     score = Math.pow(geoMeanLift, 1.5) / Math.sqrt(baseUsage + ALPHA);
   } else if (mode === 'safe') {
-    // Keep the lift signal but blend in a popularity bonus
-    // → synergistic AND reliable picks
+    // Synergy signal blended with a popularity bonus
+    // → reliable picks that also pair well
     score = geoMeanLift * Math.pow(baseUsage + ALPHA, 0.35);
   } else {
-    // Balanced: pure geometric mean lift
-    score = geoMeanLift;
+    // Balanced: normalised PMI per member, then geometric mean.
+    // nPMI(C, T) = log P(C|T) / -log P(C,T)
+    // ≈ log P(C|T) / (-log P(C) - log P(T))  [joint ≈ product for rare co-occ]
+    // Bounded in [-1, +1]: +1 = always together, 0 = independent, -1 = never.
+    // This removes the low-usage inflation that plagues raw lift.
+    const npmis = liftDetails.map(l => {
+      const pCond = Math.max(l.pConditionalPct / 100, ALPHA);
+      const pBase = Math.max(baseUsage, ALPHA);
+      const logJoint = Math.log(pCond * pBase); // log P(C|T)·P(T) ≈ log P(C,T)
+      const denom = -logJoint;
+      if (denom <= 0) return 0;
+      return Math.log(pCond / pBase) / denom; // nPMI
+    });
+    const avgNpmi = npmis.reduce((s, v) => s + v, 0) / npmis.length;
+    score = avgNpmi;
   }
 
   const withData = liftDetails.filter(l => l.hasData);

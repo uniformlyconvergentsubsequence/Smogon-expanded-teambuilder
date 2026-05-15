@@ -1303,12 +1303,12 @@ const SUGGESTION_MODES = [
   {
     id: 'balanced',
     label: '🎯 Balanced',
-    description: 'Pure synergy lift — candidates that appear significantly more often with your team than chance predicts.',
+    description: 'Normalised synergy — strong pairings at any usage level. Niche low-usage picks no longer drown out real format threats.',
   },
   {
     id: 'spicy',
     label: '🌶️ Spicy',
-    description: 'Amplifies rare high-synergy picks. Lower-usage Pokemon with strong teammate lift float to the top.',
+    description: 'Amplifies rare high-synergy picks. Lower-usage Pokémon with strong teammate lift float to the top.',
   },
   {
     id: 'safe',
