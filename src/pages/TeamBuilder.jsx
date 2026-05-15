@@ -303,6 +303,7 @@ export default function TeamBuilder() {
             pokemon={currentTeam.pokemon}
             teamMembers={teamMembers}
             teamTypes={teamTypes}
+            chaosData={chaosData}
           />
           <TypeAnalysisPanel teamMembers={teamMembers} />
         </div>
@@ -1643,11 +1644,13 @@ function ItemSearchPanel({ chaosData, formatId }) {
 }
 
 // ===================== Team Role Checklist =====================
-function TeamChecklistPanel({ pokemon, teamMembers, teamTypes }) {
+function TeamChecklistPanel({ pokemon, teamMembers, teamTypes, chaosData }) {
   const [moveData, setMoveData] = useState(null);
+  const [pokedex, setPokedex] = useState(null);
 
   useEffect(() => {
     fetchMoves().then(setMoveData).catch(() => {});
+    fetchPokedex().then(setPokedex).catch(() => {});
   }, []);
 
   const checks = useMemo(() => {
@@ -1950,6 +1953,122 @@ function TeamChecklistPanel({ pokemon, teamMembers, teamTypes }) {
     return results;
   }, [pokemon, teamMembers, teamTypes, moveData]);
 
+  // Build pokemon-name → types map for all candidates in chaos data
+  const chaosTypeMap = useMemo(() => {
+    if (!pokedex || !chaosData?.data) return {};
+    const map = {};
+    for (const name of Object.keys(chaosData.data)) {
+      const id = name.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (pokedex[id]?.types) map[name] = pokedex[id].types;
+    }
+    return map;
+  }, [pokedex, chaosData]);
+
+  // For each failing/warn check, find the top-5 format Pokemon that would fill the role
+  const roleSuggestions = useMemo(() => {
+    if (!chaosData?.data || !checks.length) return {};
+    const onTeam = new Set(teamMembers.map(m => m.species));
+    const result = {};
+
+    for (const check of checks) {
+      if (check.status === 'pass') continue;
+      const candidates = [];
+
+      for (const [name, data] of Object.entries(chaosData.data)) {
+        if (onTeam.has(name)) continue;
+        if (!data.usage || data.usage < 0.001) continue;
+
+        const abilitySum  = Object.values(data.Abilities || {}).reduce((s, v) => s + v, 0) || 1;
+        const moveEntries = Object.entries(data.Moves || {});
+        const moveDenom   = moveEntries.reduce((s, [, v]) => s + v, 0) / 4 || 1;
+        const itemSum     = Object.values(data.Items || {}).reduce((s, v) => s + v, 0) || 1;
+        const types       = chaosTypeMap[name] || [];
+
+        const hasMove     = (id)    => (data.Moves?.[id]    || 0) / moveDenom   > 0.10;
+        const hasMoveAny  = (...ids) => ids.some(hasMove);
+        const hasAbility  = (id)    => (data.Abilities?.[id] || 0) / abilitySum > 0.30;
+        const hasAbilAny  = (...ids) => ids.some(hasAbility);
+        const hasItem     = (id)    => (data.Items?.[id]    || 0) / itemSum     > 0.12;
+        const hasType     = (t)     => types.includes(t);
+        const hasTypeAny  = (...ts)  => ts.some(hasType);
+
+        let qualifies = false;
+        switch (check.name) {
+          case 'Priority':
+            qualifies = hasMoveAny('extremespeed','aquajet','bulletpunch','iceshard','machpunch',
+              'shadowsneak','accelerock','grassyglide','jetpunch','quickattack',
+              'firstimpression','watershuriken','suckerpunch','thunderclap','fakeout');
+            break;
+          case 'Fast Pokemon':
+            qualifies = hasAbilAny('speedboost','swiftswim','chlorophyll','sandrush',
+              'slushrush','unburden','protosynthesis','quarkdrive') || hasItem('choicescarf');
+            break;
+          case 'Hazards':
+            qualifies = hasMoveAny('stealthrock','spikes','toxicspikes','stickyweb','ceaselessedge','stoneaxe');
+            break;
+          case 'Hazard Control':
+            qualifies = hasMoveAny('rapidspin','defog','courtchange','tidyup','mortalspin') || hasAbility('magicbounce');
+            break;
+          case 'Toxic Spike Absorber':
+            qualifies = hasType('Poison');
+            break;
+          case 'Status Immunity':
+            qualifies = hasAbilAny('naturalcure','magicguard','magicbounce','overcoat',
+              'immunity','insomnia','vitalspirit','limber','waterveil','waterbubble',
+              'comatose','purifyingsalt','thermalexchange','goodasgold');
+            break;
+          case 'Steel Type':
+            qualifies = hasType('Steel');
+            break;
+          case 'Ground Immunity':
+            qualifies = hasType('Flying') || hasAbility('levitate');
+            break;
+          case 'Electric Immunity':
+            qualifies = hasType('Ground') || hasAbilAny('lightningrod','voltabsorb','motordrive');
+            break;
+          case 'Pivoting Moves':
+            qualifies = hasMoveAny('uturn','voltswitch','flipturn','teleport',
+              'partingshot','batonpass','chillyreception','shedtail');
+            break;
+          case 'Knock Off User':
+            qualifies = hasMove('knockoff');
+            break;
+          case 'Knock Off Absorber':
+            qualifies = hasTypeAny('Fighting','Dark','Fairy');
+            break;
+          case 'Contact Punisher':
+            qualifies = hasAbilAny('ironbarbs','roughskin','flamebody','static',
+              'effectspore','poisonpoint','gooey','tanglinghair','wanderingspirit')
+              || hasItem('rockyhelmet');
+            break;
+          case 'Immediate Power':
+            qualifies = hasItem('choiceband') || hasItem('choicespecs') || hasItem('lifeorb');
+            break;
+          case 'Breaking Core':
+            qualifies = hasMoveAny('swordsdance','nastyplot','calmmind','dragondance',
+              'quiverdance','shellsmash','bellydrum','bulkup','tailglow','growth',
+              'shiftgear','victorydance','filletaway','clangoroussoul');
+            break;
+          case 'Physical & Special':
+            if (moveData) {
+              const need = check.detail === 'No special attackers' ? 'Special' : 'Physical';
+              qualifies = moveEntries.some(([id, v]) => {
+                const move = moveData[id];
+                return move && move.category === need && (move.basePower || 0) > 0 && v / moveDenom > 0.10;
+              });
+            }
+            break;
+          default: break;
+        }
+
+        if (qualifies) candidates.push({ name, usage: data.usage });
+      }
+
+      result[check.name] = candidates.sort((a, b) => b.usage - a.usage).slice(0, 5);
+    }
+    return result;
+  }, [checks, chaosData, chaosTypeMap, moveData, teamMembers]);
+
   if (teamMembers.length === 0) return null;
   if (!moveData) {
     return (
@@ -2004,6 +2123,30 @@ function TeamChecklistPanel({ pokemon, teamMembers, teamTypes }) {
                 <p className="text-xs text-slate-500 mt-0.5">
                   {check.detail}
                 </p>
+              )}
+              {check.status !== 'pass' && roleSuggestions[check.name]?.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                  <span className="text-[10px] text-slate-600 uppercase tracking-wide shrink-0">Try:</span>
+                  {roleSuggestions[check.name].map(s => {
+                    const spriteId = s.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+                    return (
+                      <span
+                        key={s.name}
+                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-700/60 border border-slate-600/30 text-[11px] text-slate-300 cursor-default"
+                        title={`${(s.usage * 100).toFixed(1)}% usage in format`}
+                      >
+                        <img
+                          src={`https://play.pokemonshowdown.com/sprites/dex/${spriteId}.png`}
+                          alt=""
+                          className="w-4 h-4 object-contain"
+                          onError={e => { e.target.style.display = 'none'; }}
+                        />
+                        {s.name}
+                        <span className="text-slate-500 text-[10px]">{(s.usage * 100).toFixed(1)}%</span>
+                      </span>
+                    );
+                  })}
+                </div>
               )}
             </div>
           </div>
