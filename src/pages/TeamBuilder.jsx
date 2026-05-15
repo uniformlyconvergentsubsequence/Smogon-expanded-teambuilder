@@ -1379,6 +1379,9 @@ function SuggestPartnersPanel({ chaosData, teamMembers, formatId }) {
                 const barPct = (s.score / maxScore) * 100;
                 const isExpanded = expandedRow === s.name;
 
+                // pairing pills: show up to 3 inline, rest in expand
+                const pills = s.liftDetails.slice(0, 3);
+
                 return (
                   <div key={s.name} className="rounded-lg overflow-hidden">
                     {/* Main row */}
@@ -1393,49 +1396,86 @@ function SuggestPartnersPanel({ chaosData, teamMembers, formatId }) {
                         className="w-8 h-8 object-contain shrink-0"
                         onError={e => { e.target.style.opacity = '0.2'; }}
                       />
-                      <span className="flex-1 text-white font-medium">{s.name}</span>
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0 ${CONFIDENCE_STYLE[s.confidence]}`}>
-                        {s.confidence}
-                      </span>
-                      <div className="w-20 h-1.5 bg-slate-700 rounded-full overflow-hidden shrink-0">
-                        <div className="h-full bg-blue-500 rounded-full" style={{ width: `${barPct}%` }} />
-                      </div>
-                      <span className="text-xs font-mono text-slate-500 w-14 text-right shrink-0">
-                        {s.baseUsagePct.toFixed(1)}%
+                      <span className="text-white font-medium w-36 shrink-0 truncate">{s.name}</span>
+
+                      {/* Per-member pairing pills */}
+                      {s.method === 'lift' ? (
+                        <div className="flex-1 flex flex-wrap gap-1.5 min-w-0">
+                          {pills.map(l => {
+                            const memberSpriteId = l.member.toLowerCase().replace(/[^a-z0-9]/g, '');
+                            const color = l.lift >= 2
+                              ? 'bg-emerald-900/50 text-emerald-300 border-emerald-700/40'
+                              : l.lift >= 1
+                              ? 'bg-blue-900/40 text-blue-300 border-blue-700/30'
+                              : 'bg-slate-700/50 text-slate-400 border-slate-600/30';
+                            return (
+                              <span
+                                key={l.member}
+                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[11px] font-medium shrink-0 ${color}`}
+                                title={`Appears on ${l.pConditionalPct.toFixed(1)}% of ${l.member} teams (base: ${s.baseUsagePct.toFixed(1)}%)`}
+                              >
+                                <img
+                                  src={`https://play.pokemonshowdown.com/sprites/dex/${memberSpriteId}.png`}
+                                  alt=""
+                                  className="w-4 h-4 object-contain"
+                                  onError={e => { e.target.style.display = 'none'; }}
+                                />
+                                {l.pConditionalPct.toFixed(1)}%
+                              </span>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <span className="flex-1 text-xs text-slate-500 italic">no pairing data</span>
+                      )}
+
+                      {/* Base usage as baseline reference */}
+                      <span className="text-[11px] text-slate-500 shrink-0 ml-1" title="Overall format usage">
+                        base {s.baseUsagePct.toFixed(1)}%
                       </span>
                       <span className="text-slate-600 text-xs shrink-0">{isExpanded ? '▲' : '▼'}</span>
                     </button>
 
                     {/* Expandable details */}
                     {isExpanded && (
-                      <div className="px-4 pb-3 pt-1 bg-slate-800/30 text-xs space-y-1.5">
-                        <div className="flex gap-4 text-slate-400">
-                          <span>Synergy lift: <span className="text-white font-mono">{s.geoMeanLift.toFixed(2)}×</span></span>
-                          <span>Base usage: <span className="text-white font-mono">{s.baseUsagePct.toFixed(1)}%</span></span>
-                        </div>
-                        {s.liftDetails.length > 0 && (
-                          <div>
-                            <span className="text-slate-500 uppercase tracking-wide">Teammate pairings</span>
-                            <div className="mt-1 space-y-0.5">
-                              {s.liftDetails.slice(0, 4).map(l => (
-                                <div key={l.member} className="flex items-center gap-2">
-                                  <span className="text-slate-400 truncate">{l.member}</span>
-                                  <span className="ml-auto font-mono"
-                                    style={{ color: l.lift >= 2 ? '#34d399' : l.lift >= 1 ? '#94a3b8' : '#f87171' }}
-                                  >
-                                    {l.lift.toFixed(2)}×
-                                  </span>
-                                  <span className="text-slate-500 font-mono w-14 text-right">
-                                    {l.pConditionalPct.toFixed(1)}%
-                                  </span>
-                                  {!l.hasData && <span className="text-slate-600">(est.)</span>}
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                        {s.method === 'fallback' && (
-                          <p className="text-slate-500 italic">No teammate co-occurrence data — ranked by base usage.</p>
+                      <div className="px-4 pb-3 pt-1 bg-slate-800/30 text-xs">
+                        {s.method === 'fallback' ? (
+                          <p className="text-slate-500 italic py-1">No teammate co-occurrence data — ranked by base usage only.</p>
+                        ) : (
+                          <>
+                            <div className="text-slate-500 uppercase tracking-wide mb-1.5">Pairing breakdown</div>
+                            <table className="w-full">
+                              <thead>
+                                <tr className="text-slate-600 text-[10px] uppercase">
+                                  <th className="text-left pb-1 font-medium">Team member</th>
+                                  <th className="text-right pb-1 font-medium">% paired</th>
+                                  <th className="text-right pb-1 font-medium">Base usage</th>
+                                  <th className="text-right pb-1 font-medium">Lift</th>
+                                  <th className="text-right pb-1 font-medium">Co-occ.</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-700/30">
+                                {s.liftDetails.map(l => (
+                                  <tr key={l.member}>
+                                    <td className="py-1 text-slate-300 truncate max-w-[120px]">{l.member}</td>
+                                    <td className="py-1 text-right font-mono"
+                                      style={{ color: l.lift >= 2 ? '#34d399' : l.lift >= 1 ? '#93c5fd' : '#f87171' }}
+                                    >
+                                      {l.pConditionalPct.toFixed(1)}%
+                                    </td>
+                                    <td className="py-1 text-right font-mono text-slate-500">{s.baseUsagePct.toFixed(1)}%</td>
+                                    <td className="py-1 text-right font-mono text-slate-400">{l.lift.toFixed(2)}×</td>
+                                    <td className="py-1 text-right font-mono text-slate-500">
+                                      {l.hasData
+                                        ? '~' + Math.round(l.rawCoOccurrence).toLocaleString()
+                                        : <span className="text-slate-600">—</span>}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                            <p className="text-slate-600 mt-1.5">Co-occ. = weighted battle count seen together. % paired = fraction of {s.liftDetails[0]?.member ?? 'team member'} teams this Pokémon also appears on.</p>
+                          </>
                         )}
                       </div>
                     )}

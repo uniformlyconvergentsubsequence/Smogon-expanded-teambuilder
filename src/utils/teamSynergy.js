@@ -80,6 +80,8 @@ export function scoreCandidate(candidateName, teamMembers, chaosData, mode = 'ba
       member: member.species,
       lift,
       pConditionalPct: pConditional * 100,
+      rawCoOccurrence,
+      memberCount,
       hasData: rawCoOccurrence > 0,
     });
   }
