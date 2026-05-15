@@ -24,7 +24,6 @@ const Home = lazyRetry(() => import('./pages/Home'));
 const Explorer = lazyRetry(() => import('./pages/Explorer'));
 const PokemonDetail = lazyRetry(() => import('./pages/PokemonDetail'));
 const TeamBuilder = lazyRetry(() => import('./pages/TeamBuilder'));
-const AIAssistant = lazyRetry(() => import('./pages/AIAssistant'));
 
 function App() {
   return (
@@ -35,7 +34,6 @@ function App() {
           <Route path="stats" element={<Explorer />} />
           <Route path="stats/:pokemon" element={<PokemonDetail />} />
           <Route path="builder" element={<TeamBuilder />} />
-          <Route path="assistant" element={<AIAssistant />} />
         </Route>
       </Routes>
     </Suspense>

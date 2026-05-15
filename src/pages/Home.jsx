@@ -24,16 +24,9 @@ const FEATURES = [
   {
     icon: BuildIcon,
     title: 'Team Builder',
-    description: 'Build competitive teams with full EV/IV/move editing. Import and export to Pokémon Showdown.',
+    description: 'Build competitive teams with full EV/IV/move editing, synergy suggestions, and item lookup.',
     link: '/builder',
     linkLabel: 'Build a Team',
-  },
-  {
-    icon: BrainIcon,
-    title: 'AI Assistant',
-    description: 'Analyze team weaknesses, check type coverage, and get AI-powered suggestions for your team.',
-    link: '/assistant',
-    linkLabel: 'Get Help',
   },
 ];
 

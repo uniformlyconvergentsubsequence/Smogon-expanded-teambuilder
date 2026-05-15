@@ -5,7 +5,6 @@ const navItems = [
   { to: '/', label: 'Home', icon: HomeIcon },
   { to: '/stats', label: 'Stats Explorer', icon: ChartIcon },
   { to: '/builder', label: 'Team Builder', icon: BuildIcon },
-  { to: '/assistant', label: 'AI Assistant', icon: BrainIcon },
 ];
 
 export default function Navbar() {

@@ -1,6 +1,6 @@
 # Smogon Expanded Teambuilder
 
-A comprehensive competitive Pokémon teambuilder powered by Smogon usage statistics. Build teams, explore stats across every format and generation, and get AI-powered analysis — all in one clean, fast-loading interface.
+A comprehensive competitive Pokémon teambuilder powered by Smogon usage statistics. Build teams, explore stats across every format and generation — all in one clean, fast-loading interface.
 
 **Live Site:** [GitHub Pages](https://uniformlyconvergentsubsequence.github.io/Smogon-expanded-teambuilder/)
 
@@ -29,19 +29,8 @@ A comprehensive competitive Pokémon teambuilder powered by Smogon usage statist
 - Tera Type selection (Gen 9)
 - Multiple saved teams with local storage persistence
 - **Synergy score** indicator
-
-### 🤖 AI Assistant
-- **Built-in type analysis** (no API key needed):
-  - Team defensive coverage chart
-  - Individual Pokémon weaknesses
-  - Weakness/resistance summary
-- **Type combination suggestions** to cover team gaps
-- **Teammate suggestions** from Smogon stats data
-- **Format threat awareness** (top usage Pokémon in current format)
-- **AI Chat** (optional, bring your own API key):
-  - OpenAI and Anthropic support
-  - Context-aware team analysis
-  - Strategy and matchup discussion
+- **Suggest Next** — ranks candidates by conditional synergy lift (Balanced / Spicy / Safe modes) with per-member rationale
+- **Find by Item** — search any item and see which Pokémon commonly run it above a usage threshold in the current format
 
 ## Tech Stack
 

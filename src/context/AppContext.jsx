@@ -23,8 +23,6 @@ function loadSettings() {
   }
   return {
     format: { ...DEFAULT_FORMAT, month: latestMonth },
-    aiApiKey: '',
-    aiProvider: 'openai', // 'openai' or 'anthropic'
   };
 }
 
@@ -60,14 +58,6 @@ function appReducer(state, action) {
 
     case 'SET_RATING':
       newState = { ...state, format: { ...state.format, rating: action.rating } };
-      break;
-
-    case 'SET_AI_KEY':
-      newState = { ...state, aiApiKey: action.key };
-      break;
-
-    case 'SET_AI_PROVIDER':
-      newState = { ...state, aiProvider: action.provider };
       break;
 
     default:
@@ -143,8 +133,6 @@ export function AppProvider({ children }) {
     setTier: (tier) => dispatch({ type: 'SET_TIER', tier }),
     setMonth: (month) => dispatch({ type: 'SET_MONTH', month }),
     setRating: (rating) => dispatch({ type: 'SET_RATING', rating }),
-    setAiKey: (key) => dispatch({ type: 'SET_AI_KEY', key }),
-    setAiProvider: (provider) => dispatch({ type: 'SET_AI_PROVIDER', provider }),
   };
 
   return (
