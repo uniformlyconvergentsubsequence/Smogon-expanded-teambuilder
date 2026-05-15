@@ -10,6 +10,8 @@ import FormatSelector from '../components/FormatSelector';
 import { ALL_TYPES, isMonotypeFormat, hasMonotypeTypeData, getMonotypeFormatId, getSmogonDexUrl, TIERS } from '../data/formats';
 import { generateTypeMatrix, calculateSynergyScore, getTeamWeaknesses } from '../utils/typeAnalysis';
 import { getEffectivenessClass, getEffectivenessLabel, sortByValue, parseSpread } from '../utils/helpers';
+import { getSuggestions } from '../utils/teamSynergy';
+import { getFormatItemList, getItemUsers } from '../utils/itemSearch';
 
 export default function TeamBuilder() {
   const {
@@ -284,9 +286,14 @@ export default function TeamBuilder() {
         ))}
       </div>
 
-      {/* Suggest Partners */}
+      {/* Suggest Next */}
       {teamMembers.length >= 1 && teamMembers.length < 6 && chaosData && (
         <SuggestPartnersPanel chaosData={chaosData} teamMembers={teamMembers} formatId={formatId} />
+      )}
+
+      {/* Item Lookup */}
+      {chaosData && (
+        <ItemSearchPanel chaosData={chaosData} formatId={formatId} />
       )}
 
       {/* Type Analysis & Role Checklist */}
@@ -1290,65 +1297,305 @@ function ImportModal({ onImport, onClose }) {
   );
 }
 
-// ===================== Suggest Partners Panel =====================
+// ===================== Suggest Next Panel =====================
+const SUGGESTION_MODES = [
+  {
+    id: 'balanced',
+    label: '🎯 Balanced',
+    description: 'Pure synergy lift — candidates that appear significantly more often with your team than chance predicts.',
+  },
+  {
+    id: 'spicy',
+    label: '🌶️ Spicy',
+    description: 'Amplifies rare high-synergy picks. Lower-usage Pokemon with strong teammate lift float to the top.',
+  },
+  {
+    id: 'safe',
+    label: '🛡️ Safe',
+    description: 'Synergy-aware but weighted toward popular, reliable options with proven format presence.',
+  },
+];
+
+const CONFIDENCE_STYLE = {
+  high:   'bg-emerald-900/40 text-emerald-400',
+  medium: 'bg-amber-900/40 text-amber-400',
+  low:    'bg-slate-700/60 text-slate-400',
+  none:   'bg-slate-700/60 text-slate-500',
+};
+
 function SuggestPartnersPanel({ chaosData, teamMembers, formatId }) {
   const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState('balanced');
+  const [expandedRow, setExpandedRow] = useState(null);
 
-  const suggestions = useMemo(() => {
-    if (!chaosData || teamMembers.length === 0) return [];
-    const onTeam = new Set(teamMembers.map(m => m.species));
-    const scores = {};
-
-    for (const member of teamMembers) {
-      const data = getPokemonFromChaos(chaosData, member.species);
-      if (!data?.Teammates) continue;
-      for (const [name, val] of Object.entries(data.Teammates)) {
-        if (onTeam.has(name)) continue;
-        scores[name] = (scores[name] || 0) + val;
-      }
-    }
-
-    return Object.entries(scores)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 15)
-      .map(([name, score]) => ({ name, score }));
-  }, [chaosData, teamMembers]);
+  const suggestions = useMemo(
+    () => getSuggestions(teamMembers, chaosData, { mode, count: 15 }),
+    [chaosData, teamMembers, mode],
+  );
 
   const maxScore = suggestions[0]?.score || 1;
 
-  if (suggestions.length === 0) return null;
+  if (suggestions.length === 0 && !open) return null;
+
+  const modeInfo = SUGGESTION_MODES.find(m => m.id === mode);
 
   return (
-    <div className="glass-panel p-4 animate-fade-in">
+    <div className="glass-panel p-4 animate-fade-in mb-4">
+      {/* Header */}
       <button
         onClick={() => setOpen(o => !o)}
         className="w-full flex items-center justify-between text-sm font-semibold text-white hover:text-blue-400 transition-colors"
       >
-        <span>🤝 Suggest Partners ({teamMembers.length}/6 slots filled)</span>
+        <span>🤝 Suggest Next <span className="font-normal text-slate-400">({teamMembers.length}/6 slots filled)</span></span>
         <span className="text-xs text-slate-500">{open ? '▲ Hide' : '▼ Show'}</span>
       </button>
+
       {open && (
-        <div className="mt-3 space-y-0.5 max-h-96 overflow-y-auto">
-          <p className="text-xs text-slate-500 mb-2">
-            Combined teammate synergy across your current team in {formatId}.
-          </p>
-          {suggestions.map((s, i) => {
-            const sprite = `https://play.pokemonshowdown.com/sprites/dex/${s.name.toLowerCase().replace(/[^a-z0-9]/g, '')}.png`;
-            const barPct = (s.score / maxScore) * 100;
-            return (
-              <div key={s.name}
-                className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm hover:bg-slate-800/60 transition-colors"
+        <div className="mt-3">
+          {/* Mode toggle */}
+          <div className="flex gap-1.5 mb-2">
+            {SUGGESTION_MODES.map(m => (
+              <button
+                key={m.id}
+                onClick={() => { setMode(m.id); setExpandedRow(null); }}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all
+                  ${ mode === m.id
+                    ? 'bg-slate-700 text-white'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
               >
-                <span className="text-xs text-slate-600 w-5 text-right">{i + 1}</span>
-                <img src={sprite} alt="" className="w-8 h-8 object-contain flex-shrink-0"
-                  onError={e => { e.target.style.display = 'none'; }} />
-                <span className="flex-1 text-white">{s.name}</span>
-                <div className="w-24 h-1.5 bg-slate-700 rounded-full overflow-hidden">
-                  <div className="h-full bg-blue-500 rounded-full" style={{ width: `${barPct}%` }} />
-                </div>
+                {m.label}
+              </button>
+            ))}
+          </div>
+
+          <p className="text-xs text-slate-500 mb-3">{modeInfo.description}</p>
+
+          {suggestions.length === 0 ? (
+            <p className="text-xs text-slate-500 py-4 text-center">No suggestions available for this team.</p>
+          ) : (
+            <div className="space-y-px max-h-[32rem] overflow-y-auto">
+              {suggestions.map((s, i) => {
+                const spriteId = s.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+                const barPct = (s.score / maxScore) * 100;
+                const isExpanded = expandedRow === s.name;
+
+                return (
+                  <div key={s.name} className="rounded-lg overflow-hidden">
+                    {/* Main row */}
+                    <button
+                      onClick={() => setExpandedRow(isExpanded ? null : s.name)}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-slate-800/60 transition-colors text-left"
+                    >
+                      <span className="text-xs text-slate-600 w-5 text-right shrink-0">{i + 1}</span>
+                      <img
+                        src={`https://play.pokemonshowdown.com/sprites/dex/${spriteId}.png`}
+                        alt=""
+                        className="w-8 h-8 object-contain shrink-0"
+                        onError={e => { e.target.style.opacity = '0.2'; }}
+                      />
+                      <span className="flex-1 text-white font-medium">{s.name}</span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0 ${CONFIDENCE_STYLE[s.confidence]}`}>
+                        {s.confidence}
+                      </span>
+                      <div className="w-20 h-1.5 bg-slate-700 rounded-full overflow-hidden shrink-0">
+                        <div className="h-full bg-blue-500 rounded-full" style={{ width: `${barPct}%` }} />
+                      </div>
+                      <span className="text-xs font-mono text-slate-500 w-14 text-right shrink-0">
+                        {s.baseUsagePct.toFixed(1)}%
+                      </span>
+                      <span className="text-slate-600 text-xs shrink-0">{isExpanded ? '▲' : '▼'}</span>
+                    </button>
+
+                    {/* Expandable details */}
+                    {isExpanded && (
+                      <div className="px-4 pb-3 pt-1 bg-slate-800/30 text-xs space-y-1.5">
+                        <div className="flex gap-4 text-slate-400">
+                          <span>Synergy lift: <span className="text-white font-mono">{s.geoMeanLift.toFixed(2)}×</span></span>
+                          <span>Base usage: <span className="text-white font-mono">{s.baseUsagePct.toFixed(1)}%</span></span>
+                        </div>
+                        {s.liftDetails.length > 0 && (
+                          <div>
+                            <span className="text-slate-500 uppercase tracking-wide">Teammate pairings</span>
+                            <div className="mt-1 space-y-0.5">
+                              {s.liftDetails.slice(0, 4).map(l => (
+                                <div key={l.member} className="flex items-center gap-2">
+                                  <span className="text-slate-400 truncate">{l.member}</span>
+                                  <span className="ml-auto font-mono"
+                                    style={{ color: l.lift >= 2 ? '#34d399' : l.lift >= 1 ? '#94a3b8' : '#f87171' }}
+                                  >
+                                    {l.lift.toFixed(2)}×
+                                  </span>
+                                  <span className="text-slate-500 font-mono w-14 text-right">
+                                    {l.pConditionalPct.toFixed(1)}%
+                                  </span>
+                                  {!l.hasData && <span className="text-slate-600">(est.)</span>}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {s.method === 'fallback' && (
+                          <p className="text-slate-500 italic">No teammate co-occurrence data — ranked by base usage.</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ===================== Item Search Panel =====================
+function ItemSearchPanel({ chaosData, formatId }) {
+  const [open, setOpen] = useState(false);
+  const [itemQuery, setItemQuery] = useState('');
+  const [selectedItemId, setSelectedItemId] = useState('');
+  const [threshold, setThreshold] = useState(10);
+
+  const formatItems = useMemo(() => getFormatItemList(chaosData), [chaosData]);
+
+  // Filter visible item list by search text
+  const filteredItems = useMemo(() => {
+    const q = itemQuery.trim().toLowerCase();
+    const items = q
+      ? formatItems.filter(id => formatItemName(id).toLowerCase().includes(q))
+      : formatItems;
+    return items.slice(0, 80);
+  }, [formatItems, itemQuery]);
+
+  const results = useMemo(() => {
+    if (!selectedItemId) return [];
+    return getItemUsers(chaosData, selectedItemId, threshold / 100);
+  }, [chaosData, selectedItemId, threshold]);
+
+  // When chaosData changes (format switch), reset selection
+  useEffect(() => {
+    setSelectedItemId('');
+    setItemQuery('');
+  }, [chaosData]);
+
+  return (
+    <div className="glass-panel p-4 animate-fade-in mb-4">
+      {/* Header */}
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between text-sm font-semibold text-white hover:text-blue-400 transition-colors"
+      >
+        <span>🎒 Find by Item</span>
+        <span className="text-xs text-slate-500">{open ? '▲ Hide' : '▼ Show'}</span>
+      </button>
+
+      {open && (
+        <div className="mt-3">
+          <p className="text-xs text-slate-500 mb-3">
+            Search for Pokémon that commonly run a specific item in <span className="text-white">{formatId}</span>.
+          </p>
+
+          {/* Item search input */}
+          <div className="flex gap-2 mb-2">
+            <input
+              type="text"
+              value={itemQuery}
+              onChange={e => setItemQuery(e.target.value)}
+              placeholder="Search items..."
+              className="input-field flex-1"
+            />
+            {selectedItemId && (
+              <button
+                onClick={() => { setSelectedItemId(''); setItemQuery(''); }}
+                className="btn-ghost text-xs text-slate-400 hover:text-white"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+
+          {/* Item list */}
+          {!selectedItemId && (
+            <div className="max-h-48 overflow-y-auto mb-3 space-y-px">
+              {filteredItems.length === 0 ? (
+                <p className="text-xs text-slate-500 py-3 text-center">No items found.</p>
+              ) : (
+                filteredItems.map(id => (
+                  <button
+                    key={id}
+                    onClick={() => { setSelectedItemId(id); setItemQuery(formatItemName(id)); }}
+                    className="w-full text-left px-3 py-1.5 rounded text-sm text-slate-300 hover:bg-slate-800/60 hover:text-white transition-colors"
+                  >
+                    {formatItemName(id)}
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+
+          {/* Threshold slider — shown after an item is selected */}
+          {selectedItemId && (
+            <>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs text-slate-400">
+                  Showing Pokémon that run <span className="text-white font-medium">{formatItemName(selectedItemId)}</span>
+                  {' '}≥ {threshold}% of the time
+                </span>
+                <span className="text-xs font-mono text-slate-500">{threshold}%</span>
               </div>
-            );
-          })}
+              <input
+                type="range"
+                min={1}
+                max={75}
+                value={threshold}
+                onChange={e => setThreshold(Number(e.target.value))}
+                className="w-full h-1.5 accent-blue-500 mb-3"
+              />
+
+              {/* Results */}
+              {results.length === 0 ? (
+                <p className="text-xs text-slate-500 py-4 text-center">
+                  No Pokémon run {formatItemName(selectedItemId)} ≥ {threshold}% in {formatId}.
+                </p>
+              ) : (
+                <div className="space-y-px max-h-80 overflow-y-auto">
+                  <div className="flex text-[10px] text-slate-600 uppercase tracking-wide px-3 mb-1 gap-2">
+                    <span className="w-5" />
+                    <span className="w-8" />
+                    <span className="flex-1">Pokémon</span>
+                    <span className="w-32 text-right">Item usage</span>
+                    <span className="w-20 text-right">Format %</span>
+                  </div>
+                  {results.map((r, i) => {
+                    const spriteId = r.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+                    return (
+                      <div
+                        key={r.name}
+                        className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm hover:bg-slate-800/60 transition-colors"
+                      >
+                        <span className="text-xs text-slate-600 w-5 text-right shrink-0">{i + 1}</span>
+                        <img
+                          src={`https://play.pokemonshowdown.com/sprites/dex/${spriteId}.png`}
+                          alt=""
+                          className="w-8 h-8 object-contain shrink-0"
+                          onError={e => { e.target.style.opacity = '0.2'; }}
+                        />
+                        <span className="flex-1 text-white font-medium">{r.name}</span>
+                        <div className="w-32 flex items-center gap-1.5">
+                          <div className="flex-1 h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                            <div className="h-full bg-amber-500 rounded-full" style={{ width: `${Math.min(r.itemPct, 100)}%` }} />
+                          </div>
+                          <span className="text-xs font-mono text-slate-400 w-12 text-right">{r.itemPct.toFixed(1)}%</span>
+                        </div>
+                        <span className="text-xs font-mono text-slate-500 w-20 text-right">{(r.usage * 100).toFixed(1)}%</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
     </div>
