@@ -71,6 +71,25 @@ To configure:
 2. Set Source to **GitHub Actions**
 3. Push to `main` — the workflow handles the rest
 
+## Automated Daily Maintenance
+
+This repository includes two daily automation systems for real, reviewable improvements:
+
+- **Dependabot** (`.github/dependabot.yml`)
+	- Daily dependency update PRs for npm packages
+	- Daily update PRs for GitHub Actions versions
+
+- **Daily Maintenance Workflow** (`.github/workflows/daily-maintenance.yml`)
+	- Runs once per day and on manual dispatch
+	- Applies safe maintenance steps:
+		- `npm update`
+		- `npm audit fix --package-lock-only`
+		- `npm dedupe`
+	- Verifies the app still builds (`npm run build`)
+	- Opens a PR only when actual file changes are produced
+
+This keeps commit history active with meaningful, test-backed maintenance changes instead of empty edits.
+
 ## Data Sources
 
 | Source | What it provides |
