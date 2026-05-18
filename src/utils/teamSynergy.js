@@ -177,3 +177,74 @@ export function getSuggestions(teamMembers, chaosData, { mode = 'balanced', coun
 
   return results.sort((a, b) => b.score - a.score).slice(0, count);
 }
+
+/**
+ * Compute pairwise cohesion for all team members that exist in chaos data.
+ *
+ * For each ordered pair (A → B) we compute P(B | A) = Teammates[B] / weightedCount(A).
+ * We then take the average of P(B|A) and P(A|B) as the symmetric pairing rate,
+ * and also compute lift relative to B's base usage so you can see whether the
+ * pairing is genuinely above chance.
+ *
+ * Returns:
+ *   pairs   – every unique {a, b, pAtoB, pBtoA, avgPct, lift, hasData}
+ *   members – per-member summary sorted weakest-first:
+ *             { species, avgPairPct, avgLift, pairsData, inChaos }
+ */
+export function getTeamCohesion(teamMembers, chaosData) {
+  if (!chaosData?.data || teamMembers.length < 2) return { pairs: [], members: [] };
+
+  const pairs = [];
+
+  for (let i = 0; i < teamMembers.length; i++) {
+    for (let j = i + 1; j < teamMembers.length; j++) {
+      const a = teamMembers[i].species;
+      const b = teamMembers[j].species;
+
+      const dataA = getPokemonFromChaos(chaosData, a);
+      const dataB = getPokemonFromChaos(chaosData, b);
+
+      const countA = dataA ? getWeightedCount(dataA) : 0;
+      const countB = dataB ? getWeightedCount(dataB) : 0;
+
+      const rawAtoB = dataA?.Teammates?.[b] ?? 0;
+      const rawBtoA = dataB?.Teammates?.[a] ?? 0;
+
+      const pAtoB = countA > 0 ? (rawAtoB + ALPHA) / (countA + ALPHA) : ALPHA;
+      const pBtoA = countB > 0 ? (rawBtoA + ALPHA) / (countB + ALPHA) : ALPHA;
+      const avgPct = ((pAtoB + pBtoA) / 2) * 100;
+
+      // Lift relative to B's base usage (as the "expected" baseline)
+      const baseB = (dataB?.usage || 0) || ALPHA;
+      const lift = pAtoB / baseB;
+
+      pairs.push({
+        a, b,
+        pAtoB: pAtoB * 100,
+        pBtoA: pBtoA * 100,
+        avgPct,
+        lift,
+        hasData: rawAtoB > 0 || rawBtoA > 0,
+        rawAtoB,
+        rawBtoA,
+      });
+    }
+  }
+
+  // Per-member: average pairing % and lift across all their pairs
+  const members = teamMembers.map(m => {
+    const myPairs = pairs.filter(p => p.a === m.species || p.b === m.species);
+    if (myPairs.length === 0) {
+      return { species: m.species, avgPairPct: 0, avgLift: 0, pairsData: [], inChaos: false };
+    }
+    const avgPairPct = myPairs.reduce((s, p) => s + p.avgPct, 0) / myPairs.length;
+    const avgLift    = myPairs.reduce((s, p) => s + p.lift, 0)    / myPairs.length;
+    const inChaos    = !!getPokemonFromChaos(chaosData, m.species);
+    return { species: m.species, avgPairPct, avgLift, pairsData: myPairs, inChaos };
+  });
+
+  // Sort weakest cohesion first so the odd-one-out is obvious
+  members.sort((a, b) => a.avgPairPct - b.avgPairPct);
+
+  return { pairs, members };
+}

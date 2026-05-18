@@ -10,7 +10,7 @@ import FormatSelector from '../components/FormatSelector';
 import { ALL_TYPES, isMonotypeFormat, hasMonotypeTypeData, getMonotypeFormatId, getSmogonDexUrl, TIERS } from '../data/formats';
 import { generateTypeMatrix, calculateSynergyScore, getTeamWeaknesses } from '../utils/typeAnalysis';
 import { getEffectivenessClass, getEffectivenessLabel, sortByValue, parseSpread } from '../utils/helpers';
-import { getSuggestions } from '../utils/teamSynergy';
+import { getSuggestions, getTeamCohesion } from '../utils/teamSynergy';
 import { getFormatItemList, getItemUsers } from '../utils/itemSearch';
 
 export default function TeamBuilder() {
@@ -289,6 +289,11 @@ export default function TeamBuilder() {
       {/* Suggest Next */}
       {teamMembers.length >= 1 && teamMembers.length < 6 && chaosData && (
         <SuggestPartnersPanel chaosData={chaosData} teamMembers={teamMembers} formatId={formatId} />
+      )}
+
+      {/* Team Cohesion */}
+      {teamMembers.length >= 2 && chaosData && (
+        <TeamCohesionPanel chaosData={chaosData} teamMembers={teamMembers} formatId={formatId} />
       )}
 
       {/* Item Lookup */}
@@ -1484,6 +1489,214 @@ function SuggestPartnersPanel({ chaosData, teamMembers, formatId }) {
                 );
               })}
             </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ===================== Team Cohesion Panel =====================
+function TeamCohesionPanel({ chaosData, teamMembers, formatId }) {
+  const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState(null);
+
+  const { pairs, members } = useMemo(
+    () => getTeamCohesion(teamMembers, chaosData),
+    [chaosData, teamMembers],
+  );
+
+  if (members.length === 0) return null;
+
+  // Overall team cohesion = average of all pair avgPct values
+  const teamAvgPct = pairs.length
+    ? pairs.reduce((s, p) => s + p.avgPct, 0) / pairs.length
+    : 0;
+
+  const cohesionColor =
+    teamAvgPct >= 15 ? 'text-emerald-400' :
+    teamAvgPct >= 7  ? 'text-amber-400' :
+    'text-red-400';
+
+  return (
+    <div className="glass-panel p-4 animate-fade-in mb-4">
+      {/* Header */}
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between text-sm font-semibold text-white hover:text-blue-400 transition-colors"
+      >
+        <span>
+          🔗 Team Cohesion
+          <span className="font-normal text-slate-400 ml-1">({teamMembers.length} members)</span>
+          {!open && (
+            <span className={`ml-2 text-xs font-medium ${cohesionColor}`}>
+              {teamAvgPct.toFixed(1)}% avg pairing
+            </span>
+          )}
+        </span>
+        <span className="text-xs text-slate-500">{open ? '▲ Hide' : '▼ Show'}</span>
+      </button>
+
+      {open && (
+        <div className="mt-3">
+          <p className="text-xs text-slate-500 mb-3">
+            How often each of your Pokémon appears alongside the others in {formatId} teams.
+            Sorted weakest-first — the odd one out shows at the top.
+          </p>
+
+          {/* Per-member rows */}
+          <div className="space-y-px mb-4">
+            {members.map((m, i) => {
+              const spriteId = m.species.toLowerCase().replace(/[^a-z0-9]/g, '');
+              const isExpanded = expanded === m.species;
+              const barColor =
+                m.avgPairPct >= 15 ? 'bg-emerald-500' :
+                m.avgPairPct >= 7  ? 'bg-amber-500' :
+                'bg-red-500';
+              const textColor =
+                m.avgPairPct >= 15 ? 'text-emerald-400' :
+                m.avgPairPct >= 7  ? 'text-amber-400' :
+                'text-red-400';
+              // rank badge: 1 = weakest link
+              const rankLabel = i === 0 ? '⚠️ weakest' : i === members.length - 1 ? '✅ strongest' : null;
+
+              return (
+                <div key={m.species} className="rounded-lg overflow-hidden">
+                  <button
+                    onClick={() => setExpanded(isExpanded ? null : m.species)}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-slate-800/60 transition-colors text-left"
+                  >
+                    <img
+                      src={`https://play.pokemonshowdown.com/sprites/dex/${spriteId}.png`}
+                      alt=""
+                      className="w-8 h-8 object-contain shrink-0"
+                      onError={e => { e.target.style.opacity = '0.2'; }}
+                    />
+                    <span className="text-white font-medium w-36 shrink-0 truncate">{m.species}</span>
+                    {rankLabel && (
+                      <span className="text-[10px] text-slate-500 shrink-0">{rankLabel}</span>
+                    )}
+                    <div className="flex-1 flex items-center gap-2 min-w-0">
+                      <div className="flex-1 h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${barColor}`}
+                          style={{ width: `${Math.min(m.avgPairPct * 3, 100)}%` }}
+                        />
+                      </div>
+                      <span className={`text-xs font-mono shrink-0 ${textColor}`}>
+                        {m.avgPairPct.toFixed(1)}% avg
+                      </span>
+                    </div>
+                    {!m.inChaos && (
+                      <span className="text-[10px] text-slate-600 shrink-0">no data</span>
+                    )}
+                    <span className="text-slate-600 text-xs shrink-0">{isExpanded ? '▲' : '▼'}</span>
+                  </button>
+
+                  {/* Expandable: pairings with each teammate */}
+                  {isExpanded && (
+                    <div className="px-4 pb-3 pt-1 bg-slate-800/30 text-xs">
+                      <div className="text-slate-500 uppercase tracking-wide mb-1.5">Pairing with teammates</div>
+                      <table className="w-full">
+                        <thead>
+                          <tr className="text-[10px] text-slate-600 uppercase">
+                            <th className="text-left pb-1 font-medium">Teammate</th>
+                            <th className="text-right pb-1 font-medium">% on {m.species} teams</th>
+                            <th className="text-right pb-1 font-medium">% on their teams</th>
+                            <th className="text-right pb-1 font-medium">Avg</th>
+                            <th className="text-right pb-1 font-medium">Lift</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-700/30">
+                          {m.pairsData
+                            .map(p => ({
+                              ...p,
+                              teammate: p.a === m.species ? p.b : p.a,
+                              pFromMe:  p.a === m.species ? p.pAtoB : p.pBtoA,
+                              pFromThem:p.a === m.species ? p.pBtoA : p.pAtoB,
+                            }))
+                            .sort((a, b) => b.avgPct - a.avgPct)
+                            .map(p => {
+                              const tmSpriteId = p.teammate.toLowerCase().replace(/[^a-z0-9]/g, '');
+                              const liftColor = p.lift >= 2 ? '#34d399' : p.lift >= 1 ? '#93c5fd' : '#f87171';
+                              return (
+                                <tr key={p.teammate}>
+                                  <td className="py-1">
+                                    <span className="inline-flex items-center gap-1">
+                                      <img
+                                        src={`https://play.pokemonshowdown.com/sprites/dex/${tmSpriteId}.png`}
+                                        alt=""
+                                        className="w-4 h-4 object-contain"
+                                        onError={e => { e.target.style.display = 'none'; }}
+                                      />
+                                      <span className="text-slate-300">{p.teammate}</span>
+                                    </span>
+                                  </td>
+                                  <td className="py-1 text-right font-mono text-slate-300">{p.pFromMe.toFixed(1)}%</td>
+                                  <td className="py-1 text-right font-mono text-slate-400">{p.pFromThem.toFixed(1)}%</td>
+                                  <td className="py-1 text-right font-mono" style={{ color: liftColor }}>{p.avgPct.toFixed(1)}%</td>
+                                  <td className="py-1 text-right font-mono text-slate-400">{p.lift.toFixed(2)}×</td>
+                                </tr>
+                              );
+                            })}
+                        </tbody>
+                      </table>
+                      {!m.inChaos && (
+                        <p className="text-slate-600 italic mt-1">No chaos data for {m.species} in this format.</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Pairwise matrix summary */}
+          {pairs.length >= 3 && (
+            <>
+              <div className="text-[10px] text-slate-600 uppercase tracking-wide mb-1.5">All pairs · avg pairing %</div>
+              <div className="grid gap-px"
+                style={{ gridTemplateColumns: `repeat(${teamMembers.length}, minmax(0,1fr))` }}
+              >
+                {/* Column headers */}
+                {teamMembers.map(m => (
+                  <div key={m.species} className="text-[9px] text-slate-600 text-center truncate px-0.5 pb-1">
+                    {m.species.slice(0, 6)}
+                  </div>
+                ))}
+                {/* Matrix cells */}
+                {teamMembers.map(rowM => (
+                  teamMembers.map(colM => {
+                    if (rowM.species === colM.species) {
+                      return (
+                        <div key={colM.species}
+                          className="aspect-square rounded bg-slate-800/60 flex items-center justify-center text-[9px] text-slate-600"
+                        >—</div>
+                      );
+                    }
+                    const pair = pairs.find(
+                      p => (p.a === rowM.species && p.b === colM.species) ||
+                           (p.b === rowM.species && p.a === colM.species)
+                    );
+                    const pct = pair?.avgPct ?? 0;
+                    const bg =
+                      pct >= 20 ? 'bg-emerald-700/60 text-emerald-300' :
+                      pct >= 10 ? 'bg-emerald-900/50 text-emerald-400' :
+                      pct >= 5  ? 'bg-slate-700/60 text-slate-300' :
+                      'bg-slate-800/40 text-slate-500';
+                    return (
+                      <div key={colM.species}
+                        className={`aspect-square rounded flex items-center justify-center text-[9px] font-mono ${bg}`}
+                        title={`${rowM.species} ↔ ${colM.species}: ${pct.toFixed(1)}%`}
+                      >
+                        {pct.toFixed(0)}%
+                      </div>
+                    );
+                  })
+                ))}
+              </div>
+              <p className="text-[10px] text-slate-600 mt-1">Each cell = avg % these two Pokémon appear on the same team in {formatId}.</p>
+            </>
           )}
         </div>
       )}
