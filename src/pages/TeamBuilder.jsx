@@ -1543,6 +1543,10 @@ function TeamCohesionPanel({ chaosData, teamMembers, formatId }) {
             How often each of your Pokémon appears alongside the others in {formatId} teams.
             Sorted weakest-first — the odd one out shows at the top.
           </p>
+          <p className="text-[11px] text-slate-600 mb-3">
+            Lift compares "% on this Pokemon&apos;s teams" against that teammate&apos;s overall format usage.
+            1.00x means neutral, above 1.00x means above expectation.
+          </p>
 
           {/* Per-member rows */}
           <div className="space-y-px mb-4">
@@ -1614,11 +1618,13 @@ function TeamCohesionPanel({ chaosData, teamMembers, formatId }) {
                               teammate: p.a === m.species ? p.b : p.a,
                               pFromMe:  p.a === m.species ? p.pAtoB : p.pBtoA,
                               pFromThem:p.a === m.species ? p.pBtoA : p.pAtoB,
+                              liftFromMe: p.a === m.species ? p.liftAtoB : p.liftBtoA,
+                              teammateBaseUsagePct: p.a === m.species ? p.baseBUsagePct : p.baseAUsagePct,
                             }))
                             .sort((a, b) => b.avgPct - a.avgPct)
                             .map(p => {
                               const tmSpriteId = p.teammate.toLowerCase().replace(/[^a-z0-9]/g, '');
-                              const liftColor = p.lift >= 2 ? '#34d399' : p.lift >= 1 ? '#93c5fd' : '#f87171';
+                              const liftColor = p.liftFromMe >= 2 ? '#34d399' : p.liftFromMe >= 1 ? '#93c5fd' : '#f87171';
                               return (
                                 <tr key={p.teammate}>
                                   <td className="py-1">
@@ -1635,7 +1641,9 @@ function TeamCohesionPanel({ chaosData, teamMembers, formatId }) {
                                   <td className="py-1 text-right font-mono text-slate-300">{p.pFromMe.toFixed(1)}%</td>
                                   <td className="py-1 text-right font-mono text-slate-400">{p.pFromThem.toFixed(1)}%</td>
                                   <td className="py-1 text-right font-mono" style={{ color: liftColor }}>{p.avgPct.toFixed(1)}%</td>
-                                  <td className="py-1 text-right font-mono text-slate-400">{p.lift.toFixed(2)}×</td>
+                                  <td className="py-1 text-right font-mono text-slate-400" title={`Baseline: ${p.teammate} meta usage ${p.teammateBaseUsagePct.toFixed(1)}%`}>
+                                    {p.liftFromMe.toFixed(2)}×
+                                  </td>
                                 </tr>
                               );
                             })}

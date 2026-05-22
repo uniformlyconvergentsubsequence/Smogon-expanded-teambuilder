@@ -183,8 +183,10 @@ export function getSuggestions(teamMembers, chaosData, { mode = 'balanced', coun
  *
  * For each ordered pair (A → B) we compute P(B | A) = Teammates[B] / weightedCount(A).
  * We then take the average of P(B|A) and P(A|B) as the symmetric pairing rate,
- * and also compute lift relative to B's base usage so you can see whether the
- * pairing is genuinely above chance.
+ * and compute directional lift in both directions:
+ *   lift(A -> B) = P(B | A) / P(B)
+ *   lift(B -> A) = P(A | B) / P(A)
+ * so UI rows can always show lift from the expanded Pokemon's perspective.
  *
  * Returns:
  *   pairs   – every unique {a, b, pAtoB, pBtoA, avgPct, lift, hasData}
@@ -214,16 +216,25 @@ export function getTeamCohesion(teamMembers, chaosData) {
       const pBtoA = countB > 0 ? (rawBtoA + ALPHA) / (countB + ALPHA) : ALPHA;
       const avgPct = ((pAtoB + pBtoA) / 2) * 100;
 
-      // Lift relative to B's base usage (as the "expected" baseline)
+      // Directional lift relative to teammate baseline usage in the format.
+      const baseA = (dataA?.usage || 0) || ALPHA;
       const baseB = (dataB?.usage || 0) || ALPHA;
-      const lift = pAtoB / baseB;
+      const liftAtoB = pAtoB / baseB;
+      const liftBtoA = pBtoA / baseA;
+      const avgLift = (liftAtoB + liftBtoA) / 2;
 
       pairs.push({
         a, b,
         pAtoB: pAtoB * 100,
         pBtoA: pBtoA * 100,
         avgPct,
-        lift,
+        liftAtoB,
+        liftBtoA,
+        avgLift,
+        // Keep legacy field for compatibility with any remaining callers.
+        lift: avgLift,
+        baseAUsagePct: baseA * 100,
+        baseBUsagePct: baseB * 100,
         hasData: rawAtoB > 0 || rawBtoA > 0,
         rawAtoB,
         rawBtoA,
@@ -238,7 +249,10 @@ export function getTeamCohesion(teamMembers, chaosData) {
       return { species: m.species, avgPairPct: 0, avgLift: 0, pairsData: [], inChaos: false };
     }
     const avgPairPct = myPairs.reduce((s, p) => s + p.avgPct, 0) / myPairs.length;
-    const avgLift    = myPairs.reduce((s, p) => s + p.lift, 0)    / myPairs.length;
+    const avgLift = myPairs.reduce((s, p) => {
+      const directionalLift = p.a === m.species ? p.liftAtoB : p.liftBtoA;
+      return s + directionalLift;
+    }, 0) / myPairs.length;
     const inChaos    = !!getPokemonFromChaos(chaosData, m.species);
     return { species: m.species, avgPairPct, avgLift, pairsData: myPairs, inChaos };
   });
