@@ -16,6 +16,7 @@ function loadTeams() {
         data.teams = data.teams.map(t => ({
           ...t,
           name: t.name || 'Team',
+          format: t.format || null,
           pokemon: Array.isArray(t.pokemon) ? t.pokemon : createEmptyTeam(),
         }));
         if (typeof data.currentTeamIndex !== 'number' ||
@@ -108,10 +109,11 @@ function teamReducer(state, action) {
 
     case 'SET_TEAM_FORMAT': {
       const teams = [...state.teams];
+      const existingFormat = teams[state.currentTeamIndex]?.format || {};
       teams[state.currentTeamIndex] = {
         ...teams[state.currentTeamIndex],
         formatId: action.formatId,
-        format: action.format || null,
+        format: action.format ? { ...existingFormat, ...action.format } : existingFormat,
       };
       newState = { ...state, teams };
       break;

@@ -36,10 +36,17 @@ export default function TeamBuilder() {
 
   // Keep team's stored format in sync with the current format
   useEffect(() => {
+    const storedMonoType = currentTeam?.format?.monoType || null;
     if (formatId && currentTeam.formatId !== formatId) {
-      setTeamFormat(formatId, { gen: format.gen, tier: format.tier, month: format.month, rating: format.rating });
+      setTeamFormat(formatId, {
+        gen: format.gen,
+        tier: format.tier,
+        month: format.month,
+        rating: format.rating,
+        monoType: storedMonoType,
+      });
     }
-  }, [formatId, format.gen, format.tier, format.month, format.rating]);
+  }, [formatId, format.gen, format.tier, format.month, format.rating, currentTeam?.format?.monoType]);
 
   // When switching teams, restore the team's stored format into AppContext
   useEffect(() => {
@@ -52,10 +59,26 @@ export default function TeamBuilder() {
     }
   }, [currentTeamIndex]);
 
-  // Reset monotype selection when format changes
+  // Restore per-team monotype selection (if any) when switching team/format.
   useEffect(() => {
-    setSelectedMonoType(null);
-  }, [formatId]);
+    if (hasTypeData && isMonotype) {
+      setSelectedMonoType(currentTeam?.format?.monoType || null);
+    } else {
+      setSelectedMonoType(null);
+    }
+  }, [currentTeamIndex, formatId, hasTypeData, isMonotype]);
+
+  const selectMonoType = useCallback((type) => {
+    const nextType = selectedMonoType === type ? null : type;
+    setSelectedMonoType(nextType);
+    setTeamFormat(formatId, {
+      gen: format.gen,
+      tier: format.tier,
+      month: format.month,
+      rating: format.rating,
+      monoType: nextType,
+    });
+  }, [selectedMonoType, setTeamFormat, formatId, format.gen, format.tier, format.month, format.rating]);
 
   // Fetch chaos data for the selected format (or per-type for monotype)
   useEffect(() => {
@@ -143,7 +166,7 @@ export default function TeamBuilder() {
             </h3>
             {selectedMonoType && (
               <button
-                onClick={() => setSelectedMonoType(null)}
+                onClick={() => selectMonoType(selectedMonoType)}
                 className="text-xs text-slate-400 hover:text-white transition-colors"
               >
                 ✕ Show overall
@@ -159,7 +182,7 @@ export default function TeamBuilder() {
               return (
                 <button
                   key={type}
-                  onClick={() => setSelectedMonoType(isSelected ? null : type)}
+                  onClick={() => selectMonoType(type)}
                   className={`transition-all duration-200 rounded-lg cursor-pointer hover:scale-105
                     ${isSelected ? 'ring-2 ring-white ring-offset-2 ring-offset-slate-900 scale-105' : ''}`}
                 >
@@ -211,7 +234,7 @@ export default function TeamBuilder() {
                 <span className={`text-[10px] font-normal leading-tight ${
                   i === currentTeamIndex ? 'text-blue-200' : 'text-slate-500'
                 }`}>
-                  {team.formatId}
+                  {team.formatId}{team.format?.monoType ? ` • ${team.format.monoType}` : ''}
                 </span>
               )}
             </div>
