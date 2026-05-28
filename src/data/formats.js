@@ -205,7 +205,7 @@ export function getSmogonDexUrl(pokemon, gen = 9, tier = '') {
   // Strip gen prefix from tier (e.g. "gen9monotype" -> "monotype")
   const tierKey = tier.replace(/^gen\d+/, '');
   const dexTier = DEX_TIER_SLUGS[tierKey];
-  if (dexTier && dexTier !== 'ou') {
+  if (dexTier) {
     return `https://www.smogon.com/dex/${genSlug}/pokemon/${slug}/${dexTier}/`;
   }
   return `https://www.smogon.com/dex/${genSlug}/pokemon/${slug}/`;
